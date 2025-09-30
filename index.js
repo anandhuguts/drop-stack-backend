@@ -108,6 +108,25 @@ app.put("/inspections/:id", async (req, res) => {
   }
 });
 
+app.post("/api/seed-inspections", async (req, res) => {
+  try {
+    const { inspections = [] } = req.body;
+
+    // 1. Delete all existing inspections
+    await Inspection.deleteMany({});
+
+    // 2. Insert new inspections
+    const createdInspections = await Inspection.insertMany(inspections);
+
+    res.json({
+      message: "Inspections seeded successfully",
+      inspections: createdInspections,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 
 // DELETE all inspections
