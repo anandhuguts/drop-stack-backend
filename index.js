@@ -110,7 +110,7 @@ app.put("/inspections/:id", async (req, res) => {
 
 app.post("/api/seed-inspections", async (req, res) => {
   try {
-    const { inspections = [] } = req.body;
+    const inspections = Array.isArray(req.body) ? req.body : req.body.inspections || [];
 
     // 1. Delete all existing inspections
     await Inspection.deleteMany({});
