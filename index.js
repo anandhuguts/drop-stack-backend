@@ -1,8 +1,9 @@
-// index.js
+import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
 import mongoose from "mongoose";
+import authRoutes from "./routes/Auth.js";
+import { verifyAdmin } from "./middleware/authMiddleware.js";
 import Inspection from "./models/Inspection.js";
 import rigRoutes from "./routes/rigs.js";
 import inspectorRoutes from "./routes/InspectorRoute.js";
@@ -12,20 +13,30 @@ dotenv.config();
 
 const app = express();
 
-// Middleware
 app.use(cors());
-app.use(express.json()); // to parse JSON request bodies
+app.use(express.json());
+console.log("Loaded env vars:", process.env.ADMIN_EMAIL, process.env.ADMIN_PASSWORD ? "Password loaded" : "Password missing");
 
+
+// MongoDB connection
 mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("MongoDB connected"))
+  .then(() => console.log("✅ MongoDB connected"))
   .catch(err => console.log(err));
+
 // Test route
 app.get("/", (req, res) => {
   res.send("Hello! Backend is running.");
 });
 
-// POST new inspection
-app.post("/inspections", async (req, res) => {
+
+
+// Login route (public)
+app.use("/api/auth", authRoutes);
+
+// ---------- PROTECTED ROUTES BELOW ----------
+
+// Create inspection
+app.post("/inspections", verifyAdmin, async (req, res) => {
   try {
     const { title, priority, description, scheduleDate, estimatedDuration, rig, inspectors } = req.body;
 
@@ -40,18 +51,18 @@ app.post("/inspections", async (req, res) => {
       scheduleDate,
       estimatedDuration,
       rig,
-      inspectors
+      inspectors,
     });
 
     const savedInspection = await newInspection.save();
     res.status(201).json(savedInspection);
   } catch (err) {
-    console.error(err);
     res.status(400).json({ error: err.message });
   }
 });
 
-app.get("/inspections", async (req, res) => {
+// Get all inspections
+app.get("/inspections", verifyAdmin, async (req, res) => {
   try {
     const inspections = await Inspection.find().sort({ scheduleDate: -1 });
     res.json(inspections);
@@ -60,14 +71,11 @@ app.get("/inspections", async (req, res) => {
   }
 });
 
-// GET /inspections/:id
-app.get("/inspections/:id", async (req, res) => {
+// Get inspection by ID
+app.get("/inspections/:id", verifyAdmin, async (req, res) => {
   try {
-    const { id } = req.params;
-
-    // Find inspection by ID and populate inspector details
-    const inspection = await Inspection.findById(id)
-      .populate("inspectors", "name specialties"); // only fetch name and specialties from Inspector collection
+    const inspection = await Inspection.findById(req.params.id)
+      .populate("inspectors", "name specialties");
 
     if (!inspection) {
       return res.status(404).json({ error: "Inspection not found" });
@@ -75,26 +83,22 @@ app.get("/inspections/:id", async (req, res) => {
 
     res.json(inspection);
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// UPDATE inspection by ID
-app.put("/inspections/:id", async (req, res) => {
+// Update inspection
+app.put("/inspections/:id", verifyAdmin, async (req, res) => {
   try {
-    const { id } = req.params;
     const updates = req.body;
-
-    // Ensure inspectors is an array if provided
     if (updates.inspectors && !Array.isArray(updates.inspectors)) {
       return res.status(400).json({ error: "Inspectors must be an array." });
     }
 
     const updatedInspection = await Inspection.findByIdAndUpdate(
-      id,
+      req.params.id,
       updates,
-      { new: true, runValidators: true } // return updated doc & validate schema
+      { new: true, runValidators: true }
     );
 
     if (!updatedInspection) {
@@ -103,19 +107,18 @@ app.put("/inspections/:id", async (req, res) => {
 
     res.json(updatedInspection);
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
 
-app.post("/api/seed-inspections", async (req, res) => {
+// Seed inspections (reset and add)
+app.post("/api/seed-inspections", verifyAdmin, async (req, res) => {
   try {
-    const inspections = Array.isArray(req.body) ? req.body : req.body.inspections || [];
+    const inspections = Array.isArray(req.body)
+      ? req.body
+      : req.body.inspections || [];
 
-    // 1. Delete all existing inspections
     await Inspection.deleteMany({});
-
-    // 2. Insert new inspections
     const createdInspections = await Inspection.insertMany(inspections);
 
     res.json({
@@ -123,30 +126,28 @@ app.post("/api/seed-inspections", async (req, res) => {
       inspections: createdInspections,
     });
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
 
-
-// DELETE all inspections
-app.delete("/inspections", async (req, res) => {
+// Delete all inspections
+app.delete("/inspections", verifyAdmin, async (req, res) => {
   try {
     const result = await Inspection.deleteMany({});
-    res.json({ message: "All inspections deleted successfully", deletedCount: result.deletedCount });
+    res.json({
+      message: "All inspections deleted successfully",
+      deletedCount: result.deletedCount,
+    });
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
 
+// Additional modules
+app.use("/api", verifyAdmin, rigRoutes);
+app.use("/api", verifyAdmin, inspectorRoutes);
+app.use("/api", verifyAdmin, pdfRoutes);
 
-
-app.use("/api", rigRoutes);
-app.use("/api", inspectorRoutes);
-app.use("/api", pdfRoutes);
-// Listen on port
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
-});
+// Server start
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
