@@ -21,7 +21,7 @@ const inspectionSchema = new mongoose.Schema({
   inspectors: [{ type: String, required: true }], // array of inspector names
 
   // ✅ New fields
-  completionRate: { type: Number, min: 1, max: 100, default: 0 },
+  completionRate: { type: Number, min: 0, max: 100, default: 0 },
   issues: { type: String, default: "" },
 }, { timestamps: true });
 
