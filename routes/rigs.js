@@ -28,6 +28,7 @@ router.get("/rigs/:id", async (req, res) => {
 
 // POST new rig
 router.post("/rigs", async (req, res) => {
+  
   try {
     const { name, location } = req.body;
     if (!name || !location) {

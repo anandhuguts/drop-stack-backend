@@ -38,7 +38,17 @@ app.use("/api/auth", authRoutes);
 // Create inspection
 app.post("/inspections", verifyAdmin, async (req, res) => {
   try {
-    const { title, priority, description, scheduleDate, estimatedDuration, rig, inspectors } = req.body;
+    const { 
+      title, 
+      priority, 
+      description, 
+      scheduleDate, 
+      estimatedDuration, 
+      rig, 
+      inspectors, 
+      completionRate,  // ✅ new
+      issues           // ✅ new
+    } = req.body;
 
     if (!Array.isArray(inspectors) || inspectors.length === 0) {
       return res.status(400).json({ error: "At least one inspector must be assigned." });
@@ -52,6 +62,8 @@ app.post("/inspections", verifyAdmin, async (req, res) => {
       estimatedDuration,
       rig,
       inspectors,
+      completionRate: completionRate || 0,  // default to 0 if not provided
+      issues: issues || "",                 // default to empty string if not provided
     });
 
     const savedInspection = await newInspection.save();
@@ -60,6 +72,7 @@ app.post("/inspections", verifyAdmin, async (req, res) => {
     res.status(400).json({ error: err.message });
   }
 });
+
 
 // Get all inspections
 app.get("/inspections", verifyAdmin, async (req, res) => {
@@ -112,14 +125,21 @@ app.put("/inspections/:id", verifyAdmin, async (req, res) => {
 });
 
 // Seed inspections (reset and add)
-app.post("/api/seed-inspections", verifyAdmin, async (req, res) => {
+app.post("/api/seed-inspections", async (req, res) => {
   try {
     const inspections = Array.isArray(req.body)
       ? req.body
       : req.body.inspections || [];
 
     await Inspection.deleteMany({});
-    const createdInspections = await Inspection.insertMany(inspections);
+
+    const createdInspections = [];
+
+    for (const data of inspections) {
+      const inspection = new Inspection(data);
+      const saved = await inspection.save(); // ✅ triggers pre('save')
+      createdInspections.push(saved);
+    }
 
     res.json({
       message: "Inspections seeded successfully",
@@ -130,18 +150,6 @@ app.post("/api/seed-inspections", verifyAdmin, async (req, res) => {
   }
 });
 
-// Delete all inspections
-app.delete("/inspections", verifyAdmin, async (req, res) => {
-  try {
-    const result = await Inspection.deleteMany({});
-    res.json({
-      message: "All inspections deleted successfully",
-      deletedCount: result.deletedCount,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 // Additional modules
 app.use("/api", verifyAdmin, rigRoutes);
