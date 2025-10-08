@@ -38,17 +38,7 @@ app.use("/api/auth", authRoutes);
 // Create inspection
 app.post("/inspections", verifyAdmin, async (req, res) => {
   try {
-    const { 
-      title, 
-      priority, 
-      description, 
-      scheduleDate, 
-      estimatedDuration, 
-      rig, 
-      inspectors, 
-      completionRate,  // ✅ new
-      issues           // ✅ new
-    } = req.body;
+    const { title, priority, description, scheduleDate, estimatedDuration, rig, inspectors } = req.body;
 
     if (!Array.isArray(inspectors) || inspectors.length === 0) {
       return res.status(400).json({ error: "At least one inspector must be assigned." });
@@ -62,8 +52,6 @@ app.post("/inspections", verifyAdmin, async (req, res) => {
       estimatedDuration,
       rig,
       inspectors,
-      completionRate: completionRate || 0,  // default to 0 if not provided
-      issues: issues || "",                 // default to empty string if not provided
     });
 
     const savedInspection = await newInspection.save();
@@ -72,7 +60,6 @@ app.post("/inspections", verifyAdmin, async (req, res) => {
     res.status(400).json({ error: err.message });
   }
 });
-
 
 // Get all inspections
 app.get("/inspections", verifyAdmin, async (req, res) => {
