@@ -8,6 +8,7 @@ import Inspection from "./models/Inspection.js";
 import rigRoutes from "./routes/rigs.js";
 import inspectorRoutes from "./routes/InspectorRoute.js";
 import pdfRoutes from "./routes/PdfGenerator.js";
+import pdfReportRoutes from "./routes/PdfReport.js";
 
 dotenv.config();
 
@@ -142,6 +143,7 @@ app.post("/api/seed-inspections", async (req, res) => {
 app.use("/api", verifyAdmin, rigRoutes);
 app.use("/api", verifyAdmin, inspectorRoutes);
 app.use("/api", verifyAdmin, pdfRoutes);
+app.use("/api", verifyAdmin, pdfReportRoutes);
 
 // Server start
 const PORT = process.env.PORT || 5000;
