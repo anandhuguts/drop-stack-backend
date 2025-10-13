@@ -111,6 +111,36 @@ app.put("/inspections/:id", verifyAdmin, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// Import route
+app.post("/inspections/import", verifyAdmin, async (req, res) => {
+  console.log("Import request body:", req.body);
+  try {
+    if (!Array.isArray(req.body) || req.body.length === 0) {
+      return res.status(400).json({ message: "No inspections to import" });
+    }
+
+    const currentYear = new Date().getFullYear();
+
+    // Add unique inspectionId for each inspection
+    const inspectionsWithIds = req.body.map((item, index) => {
+      // Use timestamp + index to guarantee uniqueness
+      const uniqueSuffix = Date.now() + index;
+      return {
+        ...item,
+        inspectionId: `INS-${uniqueSuffix}-${currentYear}`,
+        scheduleDate: new Date(item.scheduleDate), // ensure it's a Date object
+      };
+    });
+
+    const createdInspections = await Inspection.insertMany(inspectionsWithIds);
+
+    res.status(200).json(createdInspections);
+  } catch (error) {
+    console.error("Import error:", error);
+    res.status(500).json({ message: "Failed to import inspections", error: error.message });
+  }
+});
+
 
 // Seed inspections (reset and add)
 app.post("/api/seed-inspections", async (req, res) => {

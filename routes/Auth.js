@@ -13,10 +13,7 @@ router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    console.log("ADMIN_EMAIL:", ADMIN_EMAIL);
-    console.log("ADMIN_PASSWORD:", ADMIN_PASSWORD);
-    console.log("Request body:", req.body);
-    console.log("Email match:", email === ADMIN_EMAIL);
+
 
     // ✅ Only declare `match` once
     const match = await bcrypt.compare(password, ADMIN_PASSWORD);
