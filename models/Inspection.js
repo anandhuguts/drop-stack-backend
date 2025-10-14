@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 
 const inspectionSchema = new mongoose.Schema({
   inspectionId: { type: String, unique: true }, // custom ID
-  title: { type: String, required: true },
+  title: { type: String, required: true,unique: true },
   priority: {
     type: String,
     enum: ["Low", "Medium", "High", "Urgent"],

@@ -27,8 +27,8 @@ router.get("/inspectors/:id", async (req, res) => {
 // POST new inspector
 router.post("/inspectors", async (req, res) => {
   try {
-    const { name, specialties } = req.body;
-    const newInspector = new Inspector({ name, specialties });
+    const { name, username, email, password, specialties } = req.body;
+    const newInspector = new Inspector({ name, username, email, password, specialties });
     const savedInspector = await newInspector.save();
     res.status(201).json(savedInspector);
   } catch (err) {
@@ -39,12 +39,18 @@ router.post("/inspectors", async (req, res) => {
 // PUT (edit) inspector by ID
 router.put("/inspectors/:id", async (req, res) => {
   try {
-    const { name, specialties } = req.body;
+    const { name, username, email, password, specialties } = req.body;
+
+    // Build update object dynamically to avoid overwriting password if blank
+    const updateData = { name, username, email, specialties };
+    if (password) updateData.password = password;
+
     const updatedInspector = await Inspector.findByIdAndUpdate(
       req.params.id,
-      { name, specialties },
+      updateData,
       { new: true, runValidators: true }
     );
+
     if (!updatedInspector) return res.status(404).json({ error: "Inspector not found" });
     res.json(updatedInspector);
   } catch (err) {
