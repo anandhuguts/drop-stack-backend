@@ -4,138 +4,344 @@ import Inspection from "../models/Inspection.js";
 
 const router = express.Router();
 
-// PDF Config - Modern, compact design with Montserrat-like sans-serif font
+// ==================== CONFIG ====================
 const PDF_CONFIG = {
-  margins: { top: 50, bottom: 50, left: 40, right: 40 },
+  margins: { top: 40, bottom: 60, left: 40, right: 40 },
   colors: {
-    primary: "#1A252F",       // Dark for headers
-    text: { dark: "#1A202C", medium: "#4A5568", light: "#718096" },
-    background: { card: "#FFFFFF" },
+    primary: "#1A252F",
+    text: { dark: "#2D3748", medium: "#4A5568", light: "#718096" },
     border: "#E2E8F0",
-    status: { pending: "#6B7280", "in-progress": "#3182CE", completed: "#2F855A", fail: "#C53030" },
-    priority: { Low: "#2F855A", Medium: "#D97706", High: "#C53030", Urgent: "#9B2C2C" }
+    status: {
+      PASS: "#48BB78",
+      FAIL: "#F56565",
+      PENDING: "#ED8936",
+      OTHER: "#718096"
+    }
   },
-  fonts: { header: "Helvetica-Bold", body: "Helvetica", bodyBold: "Helvetica-Bold" },
-  spacing: { section: 15, line: 4 }
+  fonts: { header: "Helvetica-Bold", body: "Helvetica" },
+  lineHeight: 14
 };
 
-// Helpers
+// ==================== HELPERS ====================
 const PDFHelpers = {
-  addSectionHeader(doc, title, subtitle) {
-    doc.moveDown(1);
-    doc.fontSize(14).font(PDF_CONFIG.fonts.header).fillColor(PDF_CONFIG.colors.primary)
-       .text(title.toUpperCase(), { align: "left" });
-    if (subtitle) {
-      doc.fontSize(9).font(PDF_CONFIG.fonts.body).fillColor(PDF_CONFIG.colors.text.light)
-         .text(subtitle, { align: "left" });
+  checkPageSpace(doc, needed = 100) {
+    if (doc.y + needed >= doc.page.height - PDF_CONFIG.margins.bottom - 20) {
+      doc.addPage();
+      return true;
     }
-    doc.moveTo(PDF_CONFIG.margins.left, doc.y + 4)
-       .lineTo(doc.page.width - PDF_CONFIG.margins.right, doc.y + 4)
-       .strokeColor(PDF_CONFIG.colors.border).lineWidth(0.5).stroke();
+    return false;
+  },
+
+  addSectionTitle(doc, title) {
+    this.checkPageSpace(doc, 40);
+    doc
+      .fontSize(11)
+      .font(PDF_CONFIG.fonts.header)
+      .fillColor(PDF_CONFIG.colors.primary)
+      .text(title.toUpperCase(), PDF_CONFIG.margins.left, doc.y);
+    doc
+      .moveTo(PDF_CONFIG.margins.left, doc.y + 5)
+      .lineTo(doc.page.width - PDF_CONFIG.margins.right, doc.y + 5)
+      .strokeColor(PDF_CONFIG.colors.border)
+      .stroke();
+    doc.moveDown(0.8);
+  },
+
+  addField(doc, label, value, options = {}) {
+    const {
+      x = PDF_CONFIG.margins.left,
+      maxWidth =
+        doc.page.width -
+        PDF_CONFIG.margins.left -
+        PDF_CONFIG.margins.right
+    } = options;
+
+    this.checkPageSpace(doc, 20);
+    const currentY = doc.y;
+
+    doc
+      .fontSize(8)
+      .font(PDF_CONFIG.fonts.header)
+      .fillColor(PDF_CONFIG.colors.text.medium)
+      .text(label + ":", x, currentY);
+
+    doc
+      .fontSize(9)
+      .font(PDF_CONFIG.fonts.body)
+      .fillColor(PDF_CONFIG.colors.text.dark)
+      .text(value || "—", x + 120, currentY, {
+        width: maxWidth - 120,
+        align: "left"
+      });
+
     doc.moveDown(0.5);
   },
 
-  createCard(doc, contentHeight) {
-    const padding = 10;
-    const height = contentHeight + padding * 2;
-    doc.rect(PDF_CONFIG.margins.left, doc.y, doc.page.width - PDF_CONFIG.margins.left - PDF_CONFIG.margins.right, height)
-       .fillColor(PDF_CONFIG.colors.background.card).fill()
-       .strokeColor(PDF_CONFIG.colors.border).lineWidth(0.5).stroke();
-    return { x: PDF_CONFIG.margins.left + padding, y: doc.y + padding, width: doc.page.width - PDF_CONFIG.margins.left - PDF_CONFIG.margins.right - padding * 2, height: height - padding * 2 };
+  addTextBlock(doc, label, value) {
+    if (!value) return;
+    this.checkPageSpace(doc, 40);
+
+    doc
+      .fontSize(8)
+      .font(PDF_CONFIG.fonts.header)
+      .fillColor(PDF_CONFIG.colors.text.medium)
+      .text(label + ":", PDF_CONFIG.margins.left, doc.y);
+    doc.moveDown(0.3);
+
+    doc
+      .fontSize(9)
+      .font(PDF_CONFIG.fonts.body)
+      .fillColor(PDF_CONFIG.colors.text.dark)
+      .text(value, PDF_CONFIG.margins.left, doc.y, {
+        width:
+          doc.page.width -
+          PDF_CONFIG.margins.left -
+          PDF_CONFIG.margins.right,
+        align: "justify",
+        lineGap: 2
+      });
+    doc.moveDown(0.7);
   },
 
-  addKeyValuePair(doc, x, y, width, key, value, options = {}) {
-    const { valueColor = PDF_CONFIG.colors.text.dark, boldValue = false } = options;
-    doc.fontSize(10).font(PDF_CONFIG.fonts.bodyBold).fillColor(PDF_CONFIG.colors.text.medium)
-       .text(`${key}:`, x, y, { width: width * 0.35, continued: true });
-    doc.font(boldValue ? PDF_CONFIG.fonts.bodyBold : PDF_CONFIG.fonts.body)
-       .fillColor(valueColor).text(value, { width: width * 0.65 });
-  },
+  addStatusBadge(doc, status) {
+    const statusText = status || "PENDING";
+    const color =
+      PDF_CONFIG.colors.status[statusText] ||
+      PDF_CONFIG.colors.text.medium;
 
-  addBadge(doc, text, color, x, y) {
-    const textWidth = doc.widthOfString(text.toUpperCase());
-    const padding = 5, badgeWidth = textWidth + padding * 2, badgeHeight = 14;
-    doc.rect(x - padding, y - 2, badgeWidth, badgeHeight).fillColor(color).fill();
-    doc.fontSize(8).font(PDF_CONFIG.fonts.bodyBold).fillColor("#FFFFFF")
-       .text(text.toUpperCase(), x - padding, y + 1, { align: "center", width: badgeWidth });
-    return badgeWidth;
+    this.checkPageSpace(doc, 25);
+    const currentY = doc.y;
+
+    doc
+      .fontSize(8)
+      .font(PDF_CONFIG.fonts.header)
+      .fillColor(PDF_CONFIG.colors.text.medium)
+      .text("Status:", PDF_CONFIG.margins.left, currentY);
+
+    const badgeX = PDF_CONFIG.margins.left + 120;
+    const badgeWidth = 60;
+    const badgeHeight = 16;
+
+    doc.rect(badgeX, currentY - 2, badgeWidth, badgeHeight)
+      .fillColor(color)
+      .fill();
+
+    doc
+      .fontSize(8)
+      .font(PDF_CONFIG.fonts.header)
+      .fillColor("#FFFFFF")
+      .text(statusText, badgeX, currentY + 2, {
+        width: badgeWidth,
+        align: "center"
+      });
+
+    doc.moveDown(0.8);
   },
 
   formatDate(dateString) {
-    return new Date(dateString).toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' });
+    if (!dateString) return "—";
+    return new Date(dateString).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric"
+    });
+  },
+
+  addSignature(doc, signatureBase64) {
+    if (!signatureBase64) return;
+    this.checkPageSpace(doc, 100);
+
+    try {
+      const imageData = signatureBase64.startsWith("data:")
+        ? signatureBase64
+        : `data:image/png;base64,${signatureBase64}`;
+
+      doc.image(imageData, PDF_CONFIG.margins.left, doc.y, {
+        width: 140,
+        height: 70,
+        fit: [140, 70]
+      });
+      doc.moveDown(5);
+    } catch (err) {
+      console.error("Error adding signature:", err);
+      doc
+        .fontSize(8)
+        .fillColor(PDF_CONFIG.colors.text.light)
+        .text("Signature unavailable", PDF_CONFIG.margins.left, doc.y);
+      doc.moveDown(0.8);
+    }
+  },
+
+  addFooter(doc, pageNumber, totalPages) {
+    const footerY = doc.page.height - 35;
+
+    doc
+      .fontSize(7)
+      .fillColor(PDF_CONFIG.colors.text.light)
+      .text(
+        "Generated by Inspection Management System • Confidential",
+        PDF_CONFIG.margins.left,
+        footerY,
+        {
+          align: "center",
+          width:
+            doc.page.width -
+            PDF_CONFIG.margins.left -
+            PDF_CONFIG.margins.right
+        }
+      );
+
+    doc
+      .fontSize(7)
+      .text(`Page ${pageNumber} of ${totalPages}`, PDF_CONFIG.margins.left, footerY, {
+        align: "right",
+        width:
+          doc.page.width -
+          PDF_CONFIG.margins.left -
+          PDF_CONFIG.margins.right
+      });
   }
 };
 
+// ==================== ROUTE ====================
 router.get("/inspections/:id/pdf", async (req, res) => {
   try {
     const { id } = req.params;
     const inspection = await Inspection.findById(id);
-    if (!inspection) return res.status(404).json({ error: "Inspection not found" });
+    if (!inspection)
+      return res.status(404).json({ error: "Inspection not found" });
 
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename=inspection_${inspection._id}_${Date.now()}.pdf`);
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=inspection_${inspection.inspectionId}_${Date.now()}.pdf`
+    );
 
-    const doc = new PDFDocument({ margin: PDF_CONFIG.margins, size: "A4" });
+    const doc = new PDFDocument({
+      size: "A4",
+      bufferPages: true,
+      margins: PDF_CONFIG.margins
+    });
+
     doc.pipe(res);
 
-    // HEADER
-    doc.fontSize(22).font(PDF_CONFIG.fonts.header).fillColor(PDF_CONFIG.colors.primary)
-       .text("Inspection Report", { align: "center" });
-    doc.moveDown(0.2)
-       .fontSize(10).font(PDF_CONFIG.fonts.body).fillColor(PDF_CONFIG.colors.text.medium)
-       .text(`Report ID: ${inspection._id}`, { align: "center" });
-    doc.fontSize(8).fillColor(PDF_CONFIG.colors.text.light)
-       .text(`Generated on ${new Date().toLocaleString()}`, { align: "center" });
+    // ==================== HEADER ====================
+    doc
+      .fontSize(18)
+      .font(PDF_CONFIG.fonts.header)
+      .fillColor(PDF_CONFIG.colors.primary)
+      .text("INSPECTION REPORT", { align: "center" });
+    doc
+      .fontSize(11)
+      .font(PDF_CONFIG.fonts.header)
+      .fillColor(PDF_CONFIG.colors.text.dark)
+      .text(inspection.inspectionId, { align: "center" });
+    doc
+      .fontSize(8)
+      .font(PDF_CONFIG.fonts.body)
+      .fillColor(PDF_CONFIG.colors.text.light)
+      .text(
+        `Generated: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
+        { align: "center" }
+      );
+    doc.moveDown(1.5);
 
-    // OVERVIEW
-    PDFHelpers.addSectionHeader(doc, "Overview", "Basic inspection information");
-    let overviewCard = PDFHelpers.createCard(doc, 60);
-    let y = overviewCard.y;
-    PDFHelpers.addKeyValuePair(doc, overviewCard.x, y, overviewCard.width, "Title", inspection.title); y+=14;
-    PDFHelpers.addKeyValuePair(doc, overviewCard.x, y, overviewCard.width, "Rig", inspection.rig); y+=18;
-    doc.text("Priority:", overviewCard.x, y);
-    PDFHelpers.addBadge(doc, inspection.priority, PDF_CONFIG.colors.priority[inspection.priority], overviewCard.x + 45, y);
-    doc.text("Status:", overviewCard.x + 140, y);
-    PDFHelpers.addBadge(doc, inspection.status, PDF_CONFIG.colors.status[inspection.status] || PDF_CONFIG.colors.text.medium, overviewCard.x + 180, y);
-    doc.y = overviewCard.y + overviewCard.height + PDF_CONFIG.spacing.section;
+    // ==================== BASIC INFO ====================
+    PDFHelpers.addSectionTitle(doc, "Basic Information");
+    PDFHelpers.addField(doc, "Inspection ID", inspection.inspectionId);
+    PDFHelpers.addField(doc, "Equipment Number", inspection.EquipNumber);
+    PDFHelpers.addField(doc, "Equipment Name", inspection.EquipmentName);
+    PDFHelpers.addField(doc, "Area", inspection.AreaName);
+    PDFHelpers.addField(doc, "Location", inspection.LocationName);
+    PDFHelpers.addField(doc, "Serial Number", inspection.SerialNo);
+    PDFHelpers.addField(doc, "Checklist Number", inspection.CheckListNo);
+    PDFHelpers.addStatusBadge(doc, inspection.Status);
+    doc.moveDown(0.5);
 
-    // DESCRIPTION
-    if (inspection.description) {
-      PDFHelpers.addSectionHeader(doc, "Description", null);
-      let descCard = PDFHelpers.createCard(doc, Math.max(50, inspection.description.length/80*12));
-      doc.fontSize(10).font(PDF_CONFIG.fonts.body).fillColor(PDF_CONFIG.colors.text.dark)
-         .text(inspection.description, descCard.x, descCard.y, { width: descCard.width, lineGap: 2 });
-      doc.y = descCard.y + descCard.height + PDF_CONFIG.spacing.section;
+    // ==================== INSPECTION DETAILS ====================
+    PDFHelpers.addSectionTitle(doc, "Inspection Details");
+    PDFHelpers.addField(doc, "Inspector Name", inspection.InspectorName);
+    PDFHelpers.addField(doc, "Date Inspected", PDFHelpers.formatDate(inspection.DateInspected));
+    PDFHelpers.addField(doc, "Fastening Method", inspection.FasteningMethod);
+    PDFHelpers.addField(doc, "Secondary Fastening", inspection.SecFastMethod);
+    PDFHelpers.addField(doc, "Control", inspection.Control);
+    PDFHelpers.addField(doc, "CA Repaired Status", inspection.CARepairedStatus);
+    doc.moveDown(0.5);
+
+    // ==================== RISK ASSESSMENT ====================
+    PDFHelpers.addSectionTitle(doc, "Risk Assessment");
+    PDFHelpers.addField(doc, "Risk Level", inspection.RiskName);
+    PDFHelpers.addField(doc, "Environmental Factor", inspection.EnvironFactor);
+    PDFHelpers.addField(doc, "Consequence", inspection.Consequence);
+    doc.moveDown(0.5);
+
+    // ==================== OBSERVATIONS ====================
+    const hasComments =
+      inspection.Observation ||
+      inspection.Comments ||
+      inspection.PrimaryComments ||
+      inspection.SecondaryComments ||
+      inspection.SafetySecComments ||
+      inspection.LoadPathComments ||
+      inspection.PunchDetails;
+
+    if (hasComments) {
+      PDFHelpers.addSectionTitle(doc, "Observations & Comments");
+      PDFHelpers.addTextBlock(doc, "Observation", inspection.Observation);
+      PDFHelpers.addTextBlock(doc, "General Comments", inspection.Comments);
+      PDFHelpers.addTextBlock(doc, "Primary Comments", inspection.PrimaryComments);
+      PDFHelpers.addTextBlock(doc, "Secondary Comments", inspection.SecondaryComments);
+      PDFHelpers.addTextBlock(doc, "Safety Comments", inspection.SafetySecComments);
+      PDFHelpers.addTextBlock(doc, "Load Path Comments", inspection.LoadPathComments);
+      PDFHelpers.addTextBlock(doc, "Punch Details", inspection.PunchDetails);
+      doc.moveDown(0.5);
     }
 
-    // SCHEDULE
-    PDFHelpers.addSectionHeader(doc, "Schedule", null);
-    let scheduleCard = PDFHelpers.createCard(doc, 40);
-    y = scheduleCard.y;
-    PDFHelpers.addKeyValuePair(doc, scheduleCard.x, y, scheduleCard.width, "Scheduled Date", PDFHelpers.formatDate(inspection.scheduleDate)); y+=14;
-    PDFHelpers.addKeyValuePair(doc, scheduleCard.x, y, scheduleCard.width, "Duration", `${inspection.estimatedDuration} hours`);
-    doc.y = scheduleCard.y + scheduleCard.height + PDF_CONFIG.spacing.section;
+    // ==================== CHECKLISTS ====================
+    const hasChecklists =
+      inspection.PrimaryChecklist?.length ||
+      inspection.SecondaryChecklist?.length ||
+      inspection.SafetyChecklist?.length ||
+      inspection.LoadPathChecklist?.length;
 
-    // INSPECTORS
-    if (inspection.inspectors && inspection.inspectors.length) {
-      PDFHelpers.addSectionHeader(doc, "Assigned Inspectors", null);
-      let inspCard = PDFHelpers.createCard(doc, inspection.inspectors.length*14);
-      y = inspCard.y;
-      inspection.inspectors.forEach((i, idx) => doc.fontSize(10).fillColor(PDF_CONFIG.colors.text.dark).text(`• ${i}`, inspCard.x, y + idx*14));
-      doc.y = inspCard.y + inspCard.height + PDF_CONFIG.spacing.section;
+    if (hasChecklists) {
+      PDFHelpers.addSectionTitle(doc, "Checklists");
+      if (inspection.PrimaryChecklist?.length)
+        PDFHelpers.addField(doc, "Primary Checklist", inspection.PrimaryChecklist.join(", "));
+      if (inspection.SecondaryChecklist?.length)
+        PDFHelpers.addField(doc, "Secondary Checklist", inspection.SecondaryChecklist.join(", "));
+      if (inspection.SafetyChecklist?.length)
+        PDFHelpers.addField(doc, "Safety Checklist", inspection.SafetyChecklist.join(", "));
+      if (inspection.LoadPathChecklist?.length)
+        PDFHelpers.addField(doc, "Load Path Checklist", inspection.LoadPathChecklist.join(", "));
+      doc.moveDown(0.5);
     }
 
-    // FOOTER
-    const footerY = doc.page.height - 40;
-    doc.moveTo(PDF_CONFIG.margins.left, footerY - 8).lineTo(doc.page.width - PDF_CONFIG.margins.right, footerY - 8)
-       .strokeColor(PDF_CONFIG.colors.border).lineWidth(0.5).stroke();
-    doc.fontSize(7).fillColor(PDF_CONFIG.colors.text.light)
-       .text("Generated by Inspection Management System • Confidential", PDF_CONFIG.margins.left, footerY, { align: "center", width: doc.page.width - 80 });
-    doc.fontSize(7).text("Page 1 of 1", PDF_CONFIG.margins.left, footerY, { align: "right", width: doc.page.width - 80 });
+    // ==================== INSPECTOR SIGNATURE ====================
+    if (inspection.InspectorSignature) {
+      PDFHelpers.addSectionTitle(doc, "Inspector Signature");
+      PDFHelpers.addField(doc, "Inspector Name", inspection.InspectorName);
+      doc.moveDown(0.3);
+      PDFHelpers.addSignature(doc, inspection.InspectorSignature);
+    }
 
-    doc.end();
+    // ==================== RECORD INFO ====================
+    PDFHelpers.addSectionTitle(doc, "Record Information");
+    PDFHelpers.addField(doc, "Created At", PDFHelpers.formatDate(inspection.createdAt));
+    PDFHelpers.addField(doc, "Last Updated", PDFHelpers.formatDate(inspection.updatedAt));
+
+    // ==================== FOOTER ====================
+    doc.flushPages(); // ✅ Ensure all pages are ready before adding footers
+    const range = doc.bufferedPageRange();
+
+    for (let i = 0; i < range.count; i++) {
+      doc.switchToPage(i);
+      PDFHelpers.addFooter(doc, i + 1, range.count);
+    }
+
+    doc.end(); // ✅ Close the PDF properly
   } catch (err) {
-    console.error(err);
+    console.error("PDF generation error:", err);
     res.status(500).json({ error: "Failed to generate PDF", details: err.message });
   }
 });

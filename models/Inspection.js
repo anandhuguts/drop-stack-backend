@@ -2,36 +2,55 @@
 import mongoose from "mongoose";
 
 const inspectionSchema = new mongoose.Schema({
-  inspectionId: { type: String, unique: true }, // custom ID
-  title: { type: String, required: true,unique: true },
-  priority: {
-    type: String,
-    enum: ["Low", "Medium", "High", "Urgent"],
-    required: true,
-  },
-  description: { type: String, required: true },
-  scheduleDate: { type: Date, required: true },
-  estimatedDuration: { type: Number, required: true }, // in hours
-  rig: { type: String, required: true },
-  status: {
-    type: String,
-    enum: ["pending", "in-progress", "completed", "fail"],
-    default: "pending",
-  },
-  inspectors: [{ type: String, required: true }], // array of inspector names
+  // Auto-generated ID
+  inspectionId: { type: String, unique: true }, // e.g. INS01-2025
 
-  // ✅ New fields
-  completionRate: { type: Number, min: 0, max: 100, default: 0 },
-  issues: { type: String, default: "" },
+  // Excel-based fields
+  EquipNumber: { type: String, required: true, unique: true },
+  AreaName: { type: String, required: true },
+  EquipmentName: { type: String, required: true },
+  FasteningMethod: { type: String },
+  Control: { type: String },
+  LocationName: { type: String },
+  RiskName: { type: String },
+  SerialNo: { type: String },
+  SecFastMethod: { type: String },
+  DateInspected: { type: Date },
+  CheckListNo: { type: String },
+  InspectorName: { type: String, required: true },
+  CARepairedStatus: { type: String },
+  Status: { 
+    type: String, 
+    enum: ["PASS", "FAIL", "PENDING", "OTHER"], 
+    default: "PENDING" 
+  },
+  EnvironFactor: { type: String },
+  Consequence: { type: String },
+  Observation: { type: String },
+  Comments: { type: String },
+  UpdatedDate: { type: Date, default: Date.now },
+  InspectorSignature: { type: String }, // Base64 signature image
+  PunchDetails: { type: String },
+  PrimaryComments: { type: String },
+  SecondaryComments: { type: String },
+  SafetySecComments: { type: String },
+  LoadPathComments: { type: String },
+
+  // Checklists (arrays of checklist IDs)
+  PrimaryChecklist: [{ type: Number }],
+  SecondaryChecklist: [{ type: Number }],
+  SafetyChecklist: [{ type: Number }],
+  LoadPathChecklist: [{ type: Number }],
 }, { timestamps: true });
 
-// Pre-save middleware to auto-generate inspectionId
+// ✅ Auto-generate custom inspectionId before saving
 inspectionSchema.pre("save", async function (next) {
   if (this.inspectionId) return next();
 
   try {
     const currentYear = new Date().getFullYear();
 
+    // Count existing inspections for this year
     const count = await mongoose.model("Inspection").countDocuments({
       createdAt: {
         $gte: new Date(`${currentYear}-01-01`),
@@ -40,9 +59,7 @@ inspectionSchema.pre("save", async function (next) {
     });
 
     const nextNumber = String(count + 1).padStart(2, "0");
-
-    this.inspectionId = `INS${nextNumber}-${currentYear}`;
-
+    this.inspectionId = `OCS${nextNumber}-${currentYear}`;
     next();
   } catch (err) {
     next(err);

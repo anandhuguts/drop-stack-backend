@@ -14,8 +14,11 @@ dotenv.config();
 
 const app = express();
 
+// Increase body size limit for JSON and urlencoded
+app.use(express.json({ limit: "50mb" }));      // for JSON payloads
+app.use(express.urlencoded({ limit: "50mb", extended: true })); // for form data
+
 app.use(cors());
-app.use(express.json());
 console.log("Loaded env vars:", process.env.ADMIN_EMAIL, process.env.ADMIN_PASSWORD ? "Password loaded" : "Password missing");
 
 
