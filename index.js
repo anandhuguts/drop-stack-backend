@@ -42,25 +42,75 @@ app.use("/api/auth", authRoutes);
 // Create inspection
 app.post("/inspections", verifyAdmin, async (req, res) => {
   try {
-    const { title, priority, description, scheduleDate, estimatedDuration, rig, inspectors } = req.body;
+    const {
+      EquipNumber,
+      EquipmentName,
+      AreaName,
+      LocationName,
+      SerialNo,
+      CheckListNo,
+      InspectorName,
+      DateInspected,
+      FasteningMethod,
+      SecFastMethod,
+      Control,
+      CARepairedStatus,
+      Status,
+      RiskName,
+      EnvironFactor,
+      Consequence,
+      Observation,
+      Comments,
+      PrimaryComments,
+      SecondaryComments,
+      SafetySecComments,
+      LoadPathComments,
+      PunchDetails,
+      PrimaryChecklist,
+      SecondaryChecklist,
+      SafetyChecklist,
+      LoadPathChecklist,
+    } = req.body;
 
-    if (!Array.isArray(inspectors) || inspectors.length === 0) {
-      return res.status(400).json({ error: "At least one inspector must be assigned." });
+    // Basic validation
+    if (!EquipNumber || !EquipmentName || !AreaName || !InspectorName) {
+      return res.status(400).json({ error: "Required fields missing." });
     }
 
     const newInspection = new Inspection({
-      title,
-      priority,
-      description,
-      scheduleDate,
-      estimatedDuration,
-      rig,
-      inspectors,
+      EquipNumber,
+      EquipmentName,
+      AreaName,
+      LocationName,
+      SerialNo,
+      CheckListNo,
+      InspectorName,
+      DateInspected,
+      FasteningMethod,
+      SecFastMethod,
+      Control,
+      CARepairedStatus,
+      Status,
+      RiskName,
+      EnvironFactor,
+      Consequence,
+      Observation,
+      Comments,
+      PrimaryComments,
+      SecondaryComments,
+      SafetySecComments,
+      LoadPathComments,
+      PunchDetails,
+      PrimaryChecklist,
+      SecondaryChecklist,
+      SafetyChecklist,
+      LoadPathChecklist,
     });
 
     const savedInspection = await newInspection.save();
     res.status(201).json(savedInspection);
   } catch (err) {
+    console.error(err);
     res.status(400).json({ error: err.message });
   }
 });
