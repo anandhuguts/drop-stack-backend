@@ -125,7 +125,8 @@ app.get("/inspections", verifyAdmin, async (req, res) => {
   }
 });
 
-app.post("/inspections/import", async (req, res) => {
+// Delete all old inspections before importing new ones
+app.post("/inspections/import", verifyAdmin, async (req, res) => {
   console.log("Import request body:", req.body);
 
   try {
@@ -133,29 +134,37 @@ app.post("/inspections/import", async (req, res) => {
       return res.status(400).json({ message: "No inspections to import" });
     }
 
-    // ✅ Convert scheduleDate to Date object but don't assign inspectionId
+    // Step 1️⃣: Delete all existing inspections
+    await Inspection.deleteMany({});
+    console.log("🧹 All old inspections deleted");
+
+    // Step 2️⃣: Prepare new data
     const inspectionsData = req.body.map((item) => ({
       ...item,
       scheduleDate: new Date(item.scheduleDate),
     }));
 
-    // ✅ Use create() instead of insertMany()
-    // Because `insertMany()` skips Mongoose middleware by default!
+    // Step 3️⃣: Save each new inspection
     const createdInspections = [];
     for (const data of inspectionsData) {
       const inspection = new Inspection(data);
-      await inspection.save(); // This triggers the pre("save") hook
+      await inspection.save(); // triggers pre('save') middleware
       createdInspections.push(inspection);
     }
 
-    res.status(200).json(createdInspections);
+    console.log(`✅ Imported ${createdInspections.length} inspections`);
+    res.status(200).json({
+      message: "Successfully replaced all inspections",
+      importedCount: createdInspections.length,
+    });
   } catch (error) {
-    console.error("Import error:", error);
+    console.error("❌ Import error:", error);
     res
       .status(500)
       .json({ message: "Failed to import inspections", error: error.message });
   }
 });
+
 
 
 // Get inspection by ID
