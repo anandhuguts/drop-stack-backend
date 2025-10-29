@@ -117,7 +117,7 @@ app.post("/inspections", verifyAdmin, async (req, res) => {
 
 app.get("/allinspections", verifyAdmin, async (req, res) => {
   try {
-    const inspections = await Inspection.find().sort({ scheduleDate: -1 });
+    const inspections = await Inspection.find().sort({ createdAt: -1 });
     res.json(inspections);
   } catch (err) {
     res.status(500).json({ error: err.message });
