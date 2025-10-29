@@ -115,8 +115,7 @@ app.post("/inspections", verifyAdmin, async (req, res) => {
   }
 });
 
-// Get all inspections
-app.get("/inspections", verifyAdmin, async (req, res) => {
+app.get("/allinspections", verifyAdmin, async (req, res) => {
   try {
     const inspections = await Inspection.find().sort({ scheduleDate: -1 });
     res.json(inspections);
@@ -124,6 +123,118 @@ app.get("/inspections", verifyAdmin, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// Get all inspections
+// Get all inspections (Paginated + Sorted by latest first)
+app.get("/inspections", verifyAdmin, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    // ✅ Sort by createdAt to show most recently added inspections first
+    const inspections = await Inspection.find()
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const totalCount = await Inspection.countDocuments();
+
+    res.json({
+      inspections,
+      currentPage: page,
+      totalPages: Math.ceil(totalCount / limit),
+      totalCount,
+    });
+  } catch (err) {
+    console.error("Error fetching inspections:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// Add this after your inspection routes
+app.get("/api/inspections/stats", verifyAdmin, async (req, res) => {
+  try {
+    const total = await Inspection.countDocuments();
+
+    const passCount = await Inspection.countDocuments({
+      Status: { $regex: /^pass$/i },
+    });
+
+    const failCount = await Inspection.countDocuments({
+      Status: { $regex: /^fail$/i },
+    });
+
+    const pendingCount = await Inspection.countDocuments({
+      Status: { $regex: /^pending$/i },
+    });
+
+    // Area-wise stats
+    const areaStats = await Inspection.aggregate([
+      {
+        $group: {
+          _id: "$AreaName",
+          count: { $sum: 1 },
+          pass: {
+            $sum: {
+              $cond: [
+                { $regexMatch: { input: "$Status", regex: /^pass$/i } },
+                1,
+                0,
+              ],
+            },
+          },
+          fail: {
+            $sum: {
+              $cond: [
+                { $regexMatch: { input: "$Status", regex: /^fail$/i } },
+                1,
+                0,
+              ],
+            },
+          },
+          pending: {
+            $sum: {
+              $cond: [
+                { $regexMatch: { input: "$Status", regex: /^pending$/i } },
+                1,
+                0,
+              ],
+            },
+          },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          name: "$_id",
+          count: 1,
+          pass: 1,
+          fail: 1,
+          pending: 1,
+        },
+      },
+      { $sort: { name: 1 } },
+    ]);
+
+    const passRate = total > 0 ? ((passCount / total) * 100).toFixed(2) : 0;
+
+    res.json({
+      total,
+      passCount,
+      failCount,
+      pendingCount,
+      passRate,
+      areaStats, // ✅ new field
+    });
+  } catch (err) {
+    console.error("Error fetching inspection stats:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+
 
 // Delete all old inspections before importing new ones
 app.post("/inspections/import", verifyAdmin, async (req, res) => {
