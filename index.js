@@ -20,7 +20,19 @@ app.use(express.json({ limit: "50mb" }));      // for JSON payloads
 app.use(express.urlencoded({ limit: "50mb", extended: true })); // for form data
 app.use("/static", express.static("public"));
 
-app.use(cors());
+app.use(cors({
+  origin: [
+    'https://drop-stack-iota.vercel.app',
+    'http://localhost:3000',
+    'http://localhost:5173' // if using Vite
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
+
+// Handle preflight requests
+
 console.log("Loaded env vars:", process.env.ADMIN_EMAIL, process.env.ADMIN_PASSWORD ? "Password loaded" : "Password missing");
 
 
