@@ -9,6 +9,7 @@ import rigRoutes from "./routes/rigs.js";
 import inspectorRoutes from "./routes/InspectorRoute.js";
 import pdfRoutes from "./routes/PdfGenerator.js";
 import pdfReportRoutes from "./routes/PdfReport.js";
+import imageUploadRoutes from "./routes/ImageUpload.js";
 
 dotenv.config();
 
@@ -17,6 +18,7 @@ const app = express();
 // Increase body size limit for JSON and urlencoded
 app.use(express.json({ limit: "50mb" }));      // for JSON payloads
 app.use(express.urlencoded({ limit: "50mb", extended: true })); // for form data
+app.use("/static", express.static("public"));
 
 app.use(cors());
 console.log("Loaded env vars:", process.env.ADMIN_EMAIL, process.env.ADMIN_PASSWORD ? "Password loaded" : "Password missing");
@@ -24,14 +26,15 @@ console.log("Loaded env vars:", process.env.ADMIN_EMAIL, process.env.ADMIN_PASSW
 
 // MongoDB connection
 mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB connected"))
-  .catch(err => console.log(err));
+.then(() => console.log("✅ MongoDB connected"))
+.catch(err => console.log(err));
 
 // Test route
 app.get("/", (req, res) => {
   res.send("Hello! Backend is running.");
 });
 
+app.use("/api", imageUploadRoutes);
 
 
 // Login route (public)
@@ -43,6 +46,7 @@ app.use("/api/auth", authRoutes);
 app.post("/inspections", verifyAdmin, async (req, res) => {
   try {
     const {
+       photos,
       EquipNumber,
       EquipmentName,
       AreaName,
@@ -238,41 +242,45 @@ app.get("/api/inspections/stats", verifyAdmin, async (req, res) => {
 
 // Delete all old inspections before importing new ones
 app.post("/inspections/import", verifyAdmin, async (req, res) => {
-  console.log("Import request body:", req.body);
-
   try {
-    if (!Array.isArray(req.body) || req.body.length === 0) {
+    const inspections = req.body;
+
+    if (!Array.isArray(inspections) || inspections.length === 0) {
       return res.status(400).json({ message: "No inspections to import" });
     }
 
-    // Step 1️⃣: Delete all existing inspections
-    await Inspection.deleteMany({});
-    console.log("🧹 All old inspections deleted");
+    let addedCount = 0;
+    let skippedCount = 0;
 
-    // Step 2️⃣: Prepare new data
-    const inspectionsData = req.body.map((item) => ({
-      ...item,
-      scheduleDate: new Date(item.scheduleDate),
-    }));
+    for (const data of inspections) {
+      const exists = await Inspection.findOne({
+        EquipNumber: data.EquipNumber,
+        DateInspected: new Date(data.DateInspected),
+      });
 
-    // Step 3️⃣: Save each new inspection
-    const createdInspections = [];
-    for (const data of inspectionsData) {
+      if (exists) {
+        skippedCount++;
+        continue;
+      }
+
       const inspection = new Inspection(data);
-      await inspection.save(); // triggers pre('save') middleware
-      createdInspections.push(inspection);
+      await inspection.save();
+      addedCount++;
     }
 
-    console.log(`✅ Imported ${createdInspections.length} inspections`);
-    res.status(200).json({
-      message: "Successfully replaced all inspections",
-      importedCount: createdInspections.length,
+    return res.status(200).json({
+      message: "Import completed",
+      added: addedCount,
+      skipped: skippedCount,
+      totalInExcel: inspections.length,
     });
+
   } catch (error) {
     console.error("❌ Import error:", error);
-    res
-      .status(500)
-      .json({ message: "Failed to import inspections", error: error.message });
+    return res.status(500).json({
+      message: "Failed to import inspections",
+      error: error.message,
+    });
   }
 });
 
@@ -297,15 +305,19 @@ app.get("/inspections/:id", verifyAdmin, async (req, res) => {
 
 
 // Update inspection
+// Update inspection
 app.put("/inspections/:id", verifyAdmin, async (req, res) => {
   try {
+    const inspectionId = req.params.id;
     const updates = req.body;
-    if (updates.inspectors && !Array.isArray(updates.inspectors)) {
-      return res.status(400).json({ error: "Inspectors must be an array." });
+
+    // ⭐ If photos were included, update them
+    if (updates.photos && Array.isArray(updates.photos)) {
+      updates.photos = updates.photos.map((id) => new mongoose.Types.ObjectId(id));
     }
 
     const updatedInspection = await Inspection.findByIdAndUpdate(
-      req.params.id,
+      inspectionId,
       updates,
       { new: true, runValidators: true }
     );
@@ -315,12 +327,12 @@ app.put("/inspections/:id", verifyAdmin, async (req, res) => {
     }
 
     res.json(updatedInspection);
+
   } catch (err) {
+    console.error("Inspection update error:", err);
     res.status(500).json({ error: err.message });
   }
 });
-// Import route
-
 
 
 // Seed inspections (reset and add)
@@ -355,7 +367,6 @@ app.use("/api", verifyAdmin, rigRoutes);
 app.use("/api", verifyAdmin, inspectorRoutes);
 app.use("/api", verifyAdmin, pdfRoutes);
 app.use("/api", verifyAdmin, pdfReportRoutes);
-
 // Server start
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));

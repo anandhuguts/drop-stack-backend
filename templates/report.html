@@ -1,0 +1,150 @@
+<!-- templates/report.html -->
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Inspection Report</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+      :root{
+        --primary:#0f172a;
+        --muted:#64748b;
+        --accent:#2563EB;
+        --pass:#10B981;
+        --fail:#EF4444;
+        --pending:#F59E0B;
+        --bg:#ffffff;
+        --card:#f8fafc;
+      }
+      html,body{
+        margin:0;
+        padding:0;
+        font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+        color:#0f172a;
+        background:var(--bg);
+      }
+
+      /* COVER / SUMMARY */
+      .summary{
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        border-bottom: 1px solid #e6edf6;
+        padding: 18px 8px;
+      }
+      .summary-left h2{ margin:0; font-size:20px; letter-spacing:0.6px; }
+      .summary-left .muted{ color:var(--muted); font-size:11px; margin-top:6px; }
+
+      .summary-right{ display:flex; gap:14px; align-items:center; }
+      .summary-right .stat{ text-align:center; font-size:12px; color:var(--muted); }
+      .summary-right .stat strong{ display:block; font-size:18px; color:var(--primary); }
+      .summary-right .stat.pass strong{ color:var(--pass); }
+      .summary-right .stat.fail strong{ color:var(--fail); }
+      .summary-right .stat.pending strong{ color:var(--pending); }
+
+      /* table */
+      .table-wrap{ margin-top:16px; }
+      table{ width:100%; border-collapse:collapse; font-size:11px; }
+      thead th{
+        text-align:left;
+        background:var(--primary);
+        color:#fff;
+        padding:10px;
+        font-size:11px;
+      }
+      tbody td{
+        padding:10px;
+        border-bottom:1px solid #eef3f8;
+        vertical-align:middle;
+      }
+      .td-id{ width:12%; }
+      .td-date{ width:10%; text-align:center; }
+      .td-comments{ width:22%; }
+
+      .badge{
+        display:inline-block;
+        padding:5px 8px;
+        font-size:10px;
+        color:#fff;
+        border-radius:4px;
+        font-weight:600;
+      }
+      .badge.PASS, .badge.pass{ background:var(--pass); }
+      .badge.FAIL, .badge.fail{ background:var(--fail); }
+      .badge.PENDING, .badge.pending{ background:var(--pending); }
+      .badge.OTHER{ background:#94a3b8; }
+
+      /* Photos grid: 2 per row large */
+      .photos-grid{
+        margin-top:18px;
+        display:grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap:12px;
+      }
+      .photo-wrap{
+        border:1px solid #e6edf6;
+        border-radius:6px;
+        overflow:hidden;
+        height:220px; /* large images like sample */
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        background:#f8fafc;
+      }
+      .photo{
+        max-width:100%;
+        max-height:100%;
+        object-fit:cover;
+        display:block;
+      }
+
+      /* small print footer */
+      .footer{
+        margin-top:22px;
+        border-top:1px solid #eef3f8;
+        padding-top:8px;
+        font-size:10px;
+        color:var(--muted);
+        text-align:center;
+      }
+
+      /* responsive for puppeteer printing to pdf (no media queries needed usually) */
+      @media print {
+        .photos-grid{ page-break-inside: avoid; }
+        .photo-wrap{ page-break-inside: avoid; }
+      }
+    </style>
+  </head>
+  <body>
+    {{SUMMARY}}
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Inspection ID</th>
+            <th>Equip No</th>
+            <th>Equipment</th>
+            <th>Area</th>
+            <th>Inspector</th>
+            <th>Date</th>
+            <th>Status</th>
+            <th>Comments</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{ROWS}}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- PHOTOS -->
+    <div style="page-break-before:always;"></div>
+    <h3 style="margin:12px 0 6px 0; font-size:16px;">Photos</h3>
+    {{PHOTOS}}
+
+    <div class="footer">
+      Inspection Management System — Generated on ${new Date().toLocaleString()}
+    </div>
+  </body>
+</html>

@@ -41,6 +41,7 @@
     SecondaryChecklist: [{ type: Number }],
     SafetyChecklist: [{ type: Number }],
     LoadPathChecklist: [{ type: Number }],
+    photos: [{ type: mongoose.Schema.Types.ObjectId, ref: "fs.files" }],
   }, { timestamps: true });
 
   // ✅ Auto-generate custom inspectionId before saving
