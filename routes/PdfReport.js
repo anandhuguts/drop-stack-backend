@@ -1,7 +1,6 @@
 // routes/reports.js
 import express from "express";
-import { chromium } from "playwright";
-
+import puppeteer from "puppeteer";
 import fs from "fs";
 import path from "path";
 
@@ -1007,41 +1006,30 @@ router.post("/reports/pdf", async (req, res) => {
 </html>`;
 
     // Launch Puppeteer
- // Launch Playwright Chromium
-const browser = await chromium.launch({
-  headless: true,
-  args: ["--no-sandbox", "--disable-setuid-sandbox"],
-});
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+    const page = await browser.newPage();
 
-const page = await browser.newPage();
-page.setDefaultNavigationTimeout(0);
+    await page.setDefaultNavigationTimeout(60000);
+    await page.setContent(html, { waitUntil: "networkidle0" });
+    await page.emulateMediaType("print");
 
-// Load HTML into Playwright
-await page.setContent(html, { waitUntil: "load" });
+    const pdfBuffer = await page.pdf({
+      format: "A4",
+      printBackground: true,
+      margin: { top: "15mm", bottom: "15mm", left: "12mm", right: "12mm" },
+    });
 
-// Generate PDF
-const pdfBuffer = await page.pdf({
-  format: "A4",
-  printBackground: true,
-  margin: { 
-    top: "15mm",
-    bottom: "15mm",
-    left: "12mm",
-    right: "12mm"
-  },
-});
+    await browser.close();
 
-// Close browser
-await browser.close();
-
-// Send PDF to client
-res.setHeader("Content-Type", "application/pdf");
-res.setHeader(
-  "Content-Disposition",
-  `attachment; filename=DROPS_Inspection_Report_${Date.now()}.pdf`
-);
-res.send(pdfBuffer);
-
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=DROPS_Inspection_Report_${Date.now()}.pdf`
+    );
+    res.send(pdfBuffer);
   } catch (err) {
     console.error("PDF generation error:", err);
     res.status(500).json({ error: "Failed to generate PDF", details: err.message });
