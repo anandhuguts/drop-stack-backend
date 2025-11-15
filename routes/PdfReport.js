@@ -3,9 +3,6 @@ import express from "express";
 import chromium from "@sparticuz/chromium";
 import puppeteer from "puppeteer-core";
 
-import fs from "fs";
-import path from "path";
-
 const router = express.Router();
 
 // Helper: escape HTML
@@ -16,6 +13,50 @@ function escapeHtml(str = "") {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+// Group inspections by area
+function groupInspectionsByArea(inspections) {
+  const grouped = {};
+  
+  inspections.forEach(inspection => {
+    const area = inspection.AreaName || "Uncategorized";
+    if (!grouped[area]) {
+      grouped[area] = [];
+    }
+    grouped[area].push(inspection);
+  });
+  
+  return grouped;
+}
+
+// Build area sections HTML
+function buildAreaSectionsHtml(groupedInspections, hostBase) {
+  return Object.entries(groupedInspections)
+    .map(([areaName, areaInspections]) => {
+      const areaStats = buildSummaryStats(areaInspections);
+      
+      return `
+      <div class="area-section">
+        <!-- Area Header -->
+        <div class="area-header">
+          <h3 class="area-title">${escapeHtml(areaName)}</h3>
+          <div class="area-stats">
+            <span class="area-stat">Total: ${areaStats.total}</span>
+            <span class="area-stat pass">Pass: ${areaStats.pass}</span>
+            <span class="area-stat fail">Fail: ${areaStats.fail}</span>
+            <span class="area-stat">Critical: ${areaStats.critical}</span>
+            <span class="area-stat">Major: ${areaStats.major}</span>
+            <span class="area-stat">Minor: ${areaStats.minor}</span>
+          </div>
+        </div>
+        
+        <!-- Area Inspection Boxes -->
+        ${buildInspectionBoxesHtml(areaInspections, hostBase)}
+      </div>
+      `;
+    })
+    .join("\n");
 }
 
 // Build individual inspection boxes HTML
@@ -43,7 +84,6 @@ function buildInspectionBoxesHtml(inspections, hostBase) {
         <!-- Header Row -->
         <div class="inspection-header">
           <div class="header-cell"><strong>Equipment No</strong><br/>${escapeHtml(i.EquipNumber || "—")}</div>
-          <div class="header-cell"><strong>Area Name</strong><br/>${escapeHtml(i.AreaName || "—")}</div>
           <div class="header-cell"><strong>Location Name</strong><br/>${escapeHtml(i.LocationName || "—")}</div>
           <div class="header-cell"><strong>Equipment</strong><br/>${escapeHtml(i.EquipmentName || "—")}</div>
           <div class="header-cell"><strong>Control</strong><br/>${escapeHtml(i.Control || "—")}</div>
@@ -54,6 +94,7 @@ function buildInspectionBoxesHtml(inspections, hostBase) {
           <div class="header-cell"><strong>Status</strong><br/><span class="badge status-${status.toLowerCase()}">${status}</span></div>
           <div class="header-cell"><strong>Repaired<br/>Status</strong><br/>${escapeHtml(i.CARepairedStatus || "OPEN")}</div>
           <div class="header-cell"><strong>Inspector</strong><br/>${escapeHtml(i.InspectorName || "—")}</div>
+          <div class="header-cell"><strong>Date</strong><br/>${date}</div>
         </div>
         
         <!-- Photos Section (if exists) -->
@@ -110,13 +151,6 @@ function buildInspectionBoxesHtml(inspections, hostBase) {
           </div>
           ` : ''}
         </div>
-        
-        ${i.Observation ? `
-        <div class="observation-row">
-          <div class="comment-label">Observation</div>
-          <div class="comment-text">${escapeHtml(i.Observation)}</div>
-        </div>
-        ` : ''}
       </div>
       `;
     })
@@ -146,8 +180,11 @@ router.post("/reports/pdf", async (req, res) => {
       return res.status(400).json({ error: "No inspections provided" });
     }
 
+    // Group inspections by area
+    const groupedInspections = groupInspectionsByArea(inspections);
+    const areaSectionsHtml = buildAreaSectionsHtml(groupedInspections, hostBase);
+    
     const stats = buildSummaryStats(inspections);
-    const inspectionBoxesHtml = buildInspectionBoxesHtml(inspections, hostBase);
     
     // Get project info from first inspection
     const projectInfo = {
@@ -169,7 +206,7 @@ router.post("/reports/pdf", async (req, res) => {
   <style>
     @page {
       size: A4;
-      margin: 0;
+      margin: 20mm 15mm;
     }
     
     * {
@@ -181,15 +218,37 @@ router.post("/reports/pdf", async (req, res) => {
     body {
       font-family: 'Calibri', 'Arial', sans-serif;
       font-size: 9pt;
-      line-height: 1.3;
+      line-height: 1.4;
       color: #000;
-      margin: 0;
-      padding: 0;
     }
     
-    /* Page Container */
-    .page {
-      margin: 15mm 12mm;
+    /* Page Header - appears on every page */
+    @page {
+      @top-center {
+        content: element(pageHeader);
+      }
+    }
+    
+    .page-header {
+      position: running(pageHeader);
+      border-bottom: 2px solid #003366;
+      padding-bottom: 8px;
+      margin-bottom: 15px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .page-header-left {
+      font-weight: bold;
+      font-size: 10pt;
+      color: #003366;
+    }
+    
+    .page-header-right {
+      text-align: right;
+      font-size: 8pt;
+      color: #666;
     }
     
     /* Cover Page */
@@ -201,15 +260,15 @@ router.post("/reports/pdf", async (req, res) => {
       justify-content: center;
       text-align: center;
       page-break-after: always;
-      padding: 40px;
+      padding: 60px 40px;
     }
     
     .cover-logo {
       width: 400px;
       height: 200px;
-      margin-bottom: 40px;
-      background: #f0f0f0;
-      
+      margin-bottom: 50px;
+      background: #f5f5f5;
+      border: 2px solid #ddd;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -218,84 +277,76 @@ router.post("/reports/pdf", async (req, res) => {
     }
     
     .cover-title {
-      font-size: 32pt;
+      font-size: 36pt;
       font-weight: bold;
-      margin-bottom: 60px;
-      color: #000;
+      margin-bottom: 40px;
+      color: #003366;
+      letter-spacing: 2px;
     }
     
     .cover-date {
-      font-size: 24pt;
-      font-weight: bold;
-      margin-bottom: 40px;
+      font-size: 22pt;
+      font-weight: 600;
+      margin-bottom: 30px;
+      color: #333;
     }
     
     .cover-client {
-      font-size: 18pt;
+      font-size: 16pt;
       font-weight: bold;
-      margin-bottom: 30px;
+      margin-bottom: 20px;
       text-transform: uppercase;
+      color: #666;
     }
     
     .cover-project {
       font-size: 20pt;
       font-weight: bold;
-      margin-bottom: 50px;
+      margin-bottom: 60px;
       text-transform: uppercase;
+      color: #003366;
     }
     
     .cover-footer {
-      font-size: 12pt;
-      margin-top: 40px;
+      font-size: 11pt;
+      margin-top: auto;
+      color: #666;
     }
     
     .cover-footer-line {
-      font-weight: bold;
-      margin-bottom: 20px;
+      font-weight: 600;
+      margin-bottom: 15px;
     }
     
     .cover-footer-contact {
-      color: #0088cc;
-      font-size: 14pt;
+      color: #0066cc;
+      font-size: 12pt;
     }
     
     /* Quality Assurance Page */
     .qa-page {
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
       page-break-after: always;
-      padding: 40px;
+      padding: 40px 30px;
     }
     
     .qa-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 60px;
+      margin-bottom: 50px;
+      padding-bottom: 20px;
+      border-bottom: 2px solid #003366;
     }
     
-    .qa-logo-left {
-      width: 180px;
-      height: 80px;
-      background: #f0f0f0;
-      border: 2px dashed #ccc;
+    .qa-logo {
+      width: 160px;
+      height: 70px;
+      background: #f5f5f5;
+      border: 2px solid #ddd;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 10pt;
-      color: #999;
-    }
-    
-    .qa-logo-right {
-      width: 180px;
-      height: 80px;
-      background: #f0f0f0;
-      border: 2px dashed #ccc;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 10pt;
+      font-size: 9pt;
       color: #999;
     }
     
@@ -303,32 +354,38 @@ router.post("/reports/pdf", async (req, res) => {
       text-align: center;
       font-size: 24pt;
       font-weight: bold;
-      margin-bottom: 40px;
+      margin-bottom: 30px;
+      color: #003366;
     }
     
     .qa-description {
       text-align: center;
       font-size: 11pt;
-      margin-bottom: 60px;
+      margin-bottom: 50px;
+      line-height: 1.6;
+      color: #333;
     }
     
     .qa-signatures {
-      width: 600px;
-      margin: 0 auto 60px;
-      border: 2px solid #000;
+      width: 100%;
+      max-width: 650px;
+      margin: 0 auto 50px;
+      border: 2px solid #003366;
     }
     
     .qa-sig-header {
       text-align: center;
-      padding: 12px;
-      border-bottom: 2px solid #000;
+      padding: 15px;
+      border-bottom: 2px solid #003366;
       font-weight: bold;
+      background: #f5f5f5;
+      font-size: 10pt;
     }
     
     .qa-sig-row {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      border-bottom: 2px solid #000;
+      border-bottom: 2px solid #003366;
     }
     
     .qa-sig-row:last-child {
@@ -336,111 +393,81 @@ router.post("/reports/pdf", async (req, res) => {
     }
     
     .qa-sig-cell {
-      padding: 20px;
+      padding: 30px 20px;
       text-align: center;
-      border-right: 2px solid #000;
+      border-right: 2px solid #003366;
       font-weight: bold;
+      min-height: 80px;
     }
     
     .qa-sig-cell:last-child {
       border-right: none;
     }
     
-    .qa-footer {
-      display: flex;
-      justify-content: space-between;
-      margin-top: auto;
-      font-size: 9pt;
-    }
-    
-    .qa-footer-item {
-      margin-bottom: 8px;
-    }
-    
-    .qa-footer-label {
-      font-weight: bold;
-      display: inline-block;
-      width: 140px;
-    }
-    
     .qa-bottom-table {
-      margin-top: 40px;
+      margin-top: 50px;
       width: 100%;
-      border: 2px solid #000;
+      border: 2px solid #003366;
       border-collapse: collapse;
     }
     
     .qa-bottom-table td {
-      padding: 12px;
-      border: 1px solid #000;
+      padding: 12px 15px;
+      border: 1px solid #003366;
       font-size: 9pt;
     }
     
     .qa-bottom-label {
       font-weight: bold;
-      width: 120px;
+      background: #f5f5f5;
+      width: 140px;
     }
     
     /* Definitions Page */
     .definitions-page {
       page-break-after: always;
-      padding: 40px;
-    }
-    
-    .def-header {
-      display: flex;
-      justify-content: flex-end;
-      margin-bottom: 30px;
-    }
-    
-    .def-logo {
-      width: 120px;
-      height: 60px;
-      background: #f0f0f0;
-      border: 2px dashed #ccc;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 8pt;
-      color: #999;
+      padding: 30px;
     }
     
     .def-title {
       text-align: center;
-      font-size: 18pt;
+      font-size: 20pt;
       font-weight: bold;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
+      color: #003366;
     }
     
     .def-subtitle {
       text-align: center;
       font-size: 16pt;
       font-weight: bold;
-      margin-bottom: 30px;
+      margin-bottom: 35px;
+      color: #666;
     }
     
     .def-section {
-      margin-bottom: 30px;
+      margin-bottom: 35px;
     }
     
     .def-section-title {
       text-align: center;
-      font-size: 14pt;
+      font-size: 12pt;
       font-weight: bold;
-      padding: 10px;
-      border: 2px solid #000;
-      background: #f0f0f0;
+      padding: 12px;
+      border: 2px solid #003366;
+      background: #f5f5f5;
+      color: #003366;
     }
     
     .def-table {
       width: 100%;
-      border: 2px solid #000;
+      border: 2px solid #003366;
       border-top: none;
       border-collapse: collapse;
     }
     
     .def-table tr {
-      border-bottom: 2px solid #000;
+      border-bottom: 1px solid #003366;
     }
     
     .def-table tr:last-child {
@@ -449,14 +476,16 @@ router.post("/reports/pdf", async (req, res) => {
     
     .def-table td:first-child {
       width: 150px;
-      padding: 12px;
+      padding: 15px;
       text-align: center;
       font-weight: bold;
-      border-right: 2px solid #000;
+      border-right: 2px solid #003366;
+      background: #f9f9f9;
     }
     
     .def-table td:last-child {
-      padding: 12px;
+      padding: 15px 20px;
+      line-height: 1.5;
     }
     
     .def-critical { color: #dc2626; }
@@ -469,28 +498,29 @@ router.post("/reports/pdf", async (req, res) => {
     .def-no-access { color: #94a3b8; }
     
     .def-footer {
-      margin-top: 30px;
+      margin-top: 40px;
       width: 100%;
-      border: 2px solid #000;
+      border: 2px solid #003366;
       border-collapse: collapse;
     }
     
     .def-footer td {
-      padding: 12px;
-      border: 1px solid #000;
+      padding: 12px 15px;
+      border: 1px solid #003366;
       font-size: 9pt;
     }
     
     .def-footer-label {
       font-weight: bold;
-      width: 120px;
+      background: #f5f5f5;
+      width: 140px;
     }
     
-    /* Header */
+    /* Report Header */
     .report-header {
-      border: 2px solid #000;
-      padding: 12px;
-      margin-bottom: 16px;
+      border: 2px solid #003366;
+      padding: 15px;
+      margin-bottom: 20px;
       background: #f5f5f5;
     }
     
@@ -498,9 +528,9 @@ router.post("/reports/pdf", async (req, res) => {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      border-bottom: 1px solid #666;
-      padding-bottom: 8px;
-      margin-bottom: 8px;
+      border-bottom: 2px solid #003366;
+      padding-bottom: 10px;
+      margin-bottom: 12px;
     }
     
     .header-logo {
@@ -509,14 +539,11 @@ router.post("/reports/pdf", async (req, res) => {
       color: #003366;
     }
     
-    .header-title {
-      text-align: right;
-    }
-    
     .header-title h1 {
       font-size: 14pt;
       font-weight: bold;
-      margin-bottom: 4px;
+      margin-bottom: 5px;
+      color: #003366;
     }
     
     .header-title .subtitle {
@@ -527,17 +554,19 @@ router.post("/reports/pdf", async (req, res) => {
     .header-info {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 8px;
-      font-size: 8pt;
+      gap: 10px;
+      font-size: 9pt;
     }
     
     .info-row {
       display: flex;
+      line-height: 1.6;
     }
     
     .info-label {
       font-weight: bold;
-      width: 100px;
+      width: 120px;
+      color: #003366;
     }
     
     .info-value {
@@ -548,13 +577,13 @@ router.post("/reports/pdf", async (req, res) => {
     .summary-stats {
       display: grid;
       grid-template-columns: repeat(7, 1fr);
-      gap: 8px;
-      margin-bottom: 16px;
+      gap: 10px;
+      margin-bottom: 25px;
     }
     
     .stat-box {
       border: 2px solid #003366;
-      padding: 8px;
+      padding: 12px 8px;
       text-align: center;
       background: white;
     }
@@ -564,11 +593,12 @@ router.post("/reports/pdf", async (req, res) => {
       font-weight: bold;
       color: #666;
       text-transform: uppercase;
-      margin-bottom: 4px;
+      margin-bottom: 6px;
+      letter-spacing: 0.5px;
     }
     
     .stat-value {
-      font-size: 16pt;
+      font-size: 18pt;
       font-weight: bold;
       color: #003366;
     }
@@ -582,11 +612,11 @@ router.post("/reports/pdf", async (req, res) => {
     
     /* Section Headers */
     .section-header {
-      margin: 20px 0 12px 0;
+      margin: 30px 0 20px 0;
     }
     
     .section-header h2 {
-      font-size: 12pt;
+      font-size: 13pt;
       font-weight: bold;
       color: #003366;
       text-transform: uppercase;
@@ -594,15 +624,53 @@ router.post("/reports/pdf", async (req, res) => {
     }
     
     .section-line {
-      height: 2px;
+      height: 3px;
       background: #003366;
-      margin-top: 4px;
+      margin-top: 6px;
     }
+    
+    /* Area Section Styles */
+    .area-section {
+      margin-bottom: 35px;
+      page-break-inside: avoid;
+    }
+    
+    .area-header {
+      background: #003366;
+      color: white;
+      padding: 15px 20px;
+      margin-bottom: 15px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .area-title {
+      font-size: 13pt;
+      font-weight: bold;
+      margin: 0;
+    }
+    
+    .area-stats {
+      display: flex;
+      gap: 12px;
+      font-size: 9pt;
+    }
+    
+    .area-stat {
+      padding: 5px 10px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 3px;
+      font-weight: 600;
+    }
+    
+    .area-stat.pass { background: #22c55e; }
+    .area-stat.fail { background: #ef4444; }
     
     /* Inspection Box Styles */
     .inspection-box {
-      border: 2px solid #000;
-      margin-bottom: 20px;
+      border: 2px solid #003366;
+      margin-bottom: 25px;
       page-break-inside: avoid;
       background: white;
     }
@@ -610,15 +678,16 @@ router.post("/reports/pdf", async (req, res) => {
     .inspection-header {
       display: grid;
       grid-template-columns: repeat(12, 1fr);
-      border-bottom: 1px solid #000;
+      border-bottom: 2px solid #003366;
     }
     
     .header-cell {
-      padding: 6px 4px;
-      border-right: 1px solid #000;
+      padding: 10px 6px;
+      border-right: 1px solid #003366;
       font-size: 7pt;
       text-align: center;
-      background: #f0f0f0;
+      background: #f9f9f9;
+      line-height: 1.4;
     }
     
     .header-cell:last-child {
@@ -627,28 +696,28 @@ router.post("/reports/pdf", async (req, res) => {
     
     .header-cell strong {
       display: block;
-      margin-bottom: 3px;
+      margin-bottom: 4px;
       font-size: 6pt;
       color: #666;
+      text-transform: uppercase;
     }
     
     /* Photos Section */
     .photos-section {
       display: flex;
-      gap: 8px;
-      padding: 10px;
-      border-bottom: 1px solid #000;
+      gap: 12px;
+      padding: 15px;
+      border-bottom: 2px solid #003366;
       background: #fafafa;
       flex-wrap: wrap;
-      justify-content: flex-start;
     }
     
     .inspection-photo {
-      width: 180px;
-      height: 180px;
+      width: 200px;
+      height: 200px;
       object-fit: cover;
-      border: 1px solid #ccc;
-      border-radius: 3px;
+      border: 2px solid #ddd;
+      border-radius: 4px;
     }
     
     /* Comments Section */
@@ -659,10 +728,11 @@ router.post("/reports/pdf", async (req, res) => {
     }
     
     .comment-box {
-      padding: 8px;
-      border-right: 1px solid #000;
-      border-bottom: 1px solid #000;
-      font-size: 7pt;
+      padding: 12px 15px;
+      border-right: 1px solid #003366;
+      border-bottom: 1px solid #003366;
+      font-size: 8pt;
+      line-height: 1.5;
     }
     
     .comment-box:nth-child(2n) {
@@ -676,26 +746,23 @@ router.post("/reports/pdf", async (req, res) => {
     
     .comment-label {
       font-weight: bold;
-      margin-bottom: 4px;
+      margin-bottom: 6px;
       color: #003366;
-      font-size: 7pt;
+      font-size: 8pt;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
     }
     
     .comment-text {
-      font-size: 7pt;
-      line-height: 1.3;
-    }
-    
-    .observation-row {
-      padding: 8px;
-      border-top: 1px solid #000;
-      background: #fffbf0;
+      font-size: 8pt;
+      line-height: 1.5;
+      color: #333;
     }
     
     /* Badges */
     .badge {
       display: inline-block;
-      padding: 3px 8px;
+      padding: 4px 10px;
       border-radius: 3px;
       font-size: 7pt;
       font-weight: bold;
@@ -716,17 +783,17 @@ router.post("/reports/pdf", async (req, res) => {
     
     /* Footer */
     .report-footer {
-      margin-top: 30px;
-      padding-top: 12px;
+      margin-top: 40px;
+      padding-top: 15px;
       border-top: 2px solid #003366;
-      font-size: 7pt;
+      font-size: 8pt;
       color: #666;
       display: flex;
       justify-content: space-between;
     }
     
     .footer-left {
-      font-weight: bold;
+      font-weight: 600;
     }
     
     .footer-right {
@@ -740,9 +807,12 @@ router.post("/reports/pdf", async (req, res) => {
     
     /* Print Optimization */
     @media print {
-      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      body { 
+        -webkit-print-color-adjust: exact; 
+        print-color-adjust: exact; 
+      }
       .inspection-box { page-break-inside: avoid; }
-      .inspection-photo { -webkit-print-color-adjust: exact; }
+      .area-section { page-break-inside: avoid; }
     }
   </style>
 </head>
@@ -750,14 +820,14 @@ router.post("/reports/pdf", async (req, res) => {
   <!-- Cover Page -->
   <div class="cover-page">
     <div class="cover-logo">
-       <img src="${hostBase}/static/e28805cb-6174-4d0d-960b-b4bef57acca3 (1).png" class="logo-img" />
+      <img src="${hostBase}/static/e28805cb-6174-4d0d-960b-b4bef57acca3 (1).png" style="max-width: 100%; max-height: 100%; object-fit: contain;" />
     </div>
     
-    <div class="cover-title">Drops Register</div>
+    <div class="cover-title">DROPS REGISTER</div>
     
     <div class="cover-date">${new Date(inspections[0]?.DateInspected || Date.now()).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()}</div>
     
-    <div class="cover-client">${escapeHtml(projectInfo.client || "HAZTECH SOLUTIONS")}</div>
+    <div class="cover-client">${escapeHtml(projectInfo.client)}</div>
     
     <div class="cover-project">${escapeHtml(projectInfo.asset)}</div>
     
@@ -770,8 +840,8 @@ router.post("/reports/pdf", async (req, res) => {
   <!-- Quality Assurance Page -->
   <div class="qa-page">
     <div class="qa-header">
-      <div class="qa-logo-left">[OCS Logo]</div>
-      <div class="qa-logo-right">[Client Logo]</div>
+      <div class="qa-logo">[OCS Logo]</div>
+      <div class="qa-logo">[Client Logo]</div>
     </div>
     
     <div class="qa-title">QUALITY ASSURANCE</div>
@@ -781,7 +851,7 @@ router.post("/reports/pdf", async (req, res) => {
     </div>
     
     <div class="qa-signatures">
-      <div class="qa-sig-header">(3 signatures required)</div>
+      <div class="qa-sig-header">THREE SIGNATURES REQUIRED</div>
       <div class="qa-sig-row">
         <div class="qa-sig-cell">PROJECT MANAGEMENT</div>
         <div class="qa-sig-cell"></div>
@@ -796,40 +866,13 @@ router.post("/reports/pdf", async (req, res) => {
       </div>
     </div>
     
-    <div class="qa-footer">
-      <div>
-        <div class="qa-footer-item">
-          <span class="qa-footer-label">Document Title:</span> Doc 1.0
-        </div>
-        <div class="qa-footer-item">
-          <span class="qa-footer-label">Document Number:</span> 1
-        </div>
-      </div>
-      <div>
-        <div class="qa-footer-item">
-          <span class="qa-footer-label">Revised By:</span> Anna
-        </div>
-        <div class="qa-footer-item">
-          <span class="qa-footer-label">Revision:</span> Anna
-        </div>
-      </div>
-      <div>
-        <div class="qa-footer-item">
-          <span class="qa-footer-label">Approved By:</span> Mark Tranfield
-        </div>
-        <div class="qa-footer-item">
-          <span class="qa-footer-label">Approval Date:</span> 06-Nov-17
-        </div>
-      </div>
-    </div>
-    
     <table class="qa-bottom-table">
       <tr>
         <td class="qa-bottom-label">Asset</td>
         <td>${escapeHtml(projectInfo.asset)}</td>
         <td class="qa-bottom-label">Inspected By</td>
         <td>${escapeHtml(projectInfo.inspector)}</td>
-        <td colspan="2">${escapeHtml("www.ocsgroup.com | info@ocsgroup.com")}</td>
+        <td colspan="2">www.ocsgroup.com | info@ocsgroup.com</td>
       </tr>
       <tr>
         <td class="qa-bottom-label">Inspection Date</td>
@@ -844,10 +887,6 @@ router.post("/reports/pdf", async (req, res) => {
 
   <!-- Definitions Page -->
   <div class="definitions-page">
-    <div class="def-header">
-      <div class="def-logo">[Client Logo]</div>
-    </div>
-    
     <div class="def-title">DROPS AREA EQUIPMENT REGISTER</div>
     <div class="def-subtitle">DEFINITIONS</div>
     
@@ -856,15 +895,15 @@ router.post("/reports/pdf", async (req, res) => {
       <table class="def-table">
         <tr>
           <td class="def-critical">CRITICAL</td>
-          <td>A defect identified in Zone 0 that compromises the hazardous area design and integrity of the equipment that if left uncorrected may lead equipment failure, Asset damage, personal injury or death. See example sheet.</td>
+          <td>A defect identified in Zone 0 that compromises the hazardous area design and integrity of the equipment that if left uncorrected may lead to equipment failure, asset damage, personal injury or death.</td>
         </tr>
         <tr>
           <td class="def-major">MAJOR</td>
-          <td>A defect identified in Zone 1 that could compromise the integrity of the equipment, that if left uncorrected may lead to equipment failure, Asset damage, personal injury or death. See example sheet.</td>
+          <td>A defect identified in Zone 1 that could compromise the integrity of the equipment, that if left uncorrected may lead to equipment failure, asset damage, personal injury or death.</td>
         </tr>
         <tr>
           <td class="def-minor">MINOR</td>
-          <td>A defect identified in Zone 2 that compromises the regulatory suitability of the equipment. See example sheet.</td>
+          <td>A defect identified in Zone 2 that compromises the regulatory suitability of the equipment.</td>
         </tr>
         <tr>
           <td class="def-observation">OBSERVATION</td>
@@ -886,7 +925,7 @@ router.post("/reports/pdf", async (req, res) => {
         </tr>
         <tr>
           <td class="def-fail">FAIL</td>
-          <td>Equipment found to be in poor condition, or unacceptablefor the area installed.</td>
+          <td>Equipment found to be in poor condition, or unacceptable for the area installed.</td>
         </tr>
         <tr>
           <td class="def-no-access">NO ACCESS</td>
@@ -901,7 +940,7 @@ router.post("/reports/pdf", async (req, res) => {
         <td>${escapeHtml(projectInfo.asset)}</td>
         <td class="def-footer-label">Inspected By</td>
         <td>${escapeHtml(projectInfo.inspector)}</td>
-        <td colspan="2">${escapeHtml("www.ocsgroup.com | info@ocsgroup.com")}</td>
+        <td colspan="2">www.ocsgroup.com | info@ocsgroup.com</td>
       </tr>
       <tr>
         <td class="def-footer-label">Inspection Date</td>
@@ -909,106 +948,107 @@ router.post("/reports/pdf", async (req, res) => {
         <td class="def-footer-label">QA Review</td>
         <td>Anna</td>
         <td class="def-footer-label">Page No</td>
-        <td>6</td>
+        <td>3</td>
       </tr>
     </table>
   </div>
 
   <!-- Data Pages -->
   <div class="page">
-  <!-- Header -->
-  <div class="report-header">
-    <div class="header-top">
-      <div class="header-logo">OCS GROUP</div>
-      <div class="header-title">
-        <h1>DROPS SURVEY INSPECTION REPORT</h1>
-        <div class="subtitle">Dropped Objects Prevention Scheme</div>
+    <!-- Report Header -->
+    <div class="report-header">
+      <div class="header-top">
+        <div class="header-logo">OCS GROUP</div>
+        <div class="header-title">
+          <h1>DROPS SURVEY INSPECTION REPORT</h1>
+          <div class="subtitle">Dropped Objects Prevention Scheme</div>
+        </div>
+      </div>
+      <div class="header-info">
+        <div class="info-row">
+          <div class="info-label">Asset:</div>
+          <div class="info-value">${escapeHtml(projectInfo.asset)}</div>
+        </div>
+        <div class="info-row">
+          <div class="info-label">Location:</div>
+          <div class="info-value">${escapeHtml(projectInfo.location)}</div>
+        </div>
+        <div class="info-row">
+          <div class="info-label">Client:</div>
+          <div class="info-value">${escapeHtml(projectInfo.client)}</div>
+        </div>
+        <div class="info-row">
+          <div class="info-label">Inspector:</div>
+          <div class="info-value">${escapeHtml(projectInfo.inspector)}</div>
+        </div>
+        <div class="info-row">
+          <div class="info-label">Inspection Period:</div>
+          <div class="info-value">${projectInfo.dateRange}</div>
+        </div>
+        <div class="info-row">
+          <div class="info-label">Report Generated:</div>
+          <div class="info-value">${new Date().toLocaleDateString('en-GB')} ${new Date().toLocaleTimeString('en-GB')}</div>
+        </div>
       </div>
     </div>
-    <div class="header-info">
-      <div class="info-row">
-        <div class="info-label">Asset:</div>
-        <div class="info-value">${escapeHtml(projectInfo.asset)}</div>
-      </div>
-      <div class="info-row">
-        <div class="info-label">Location:</div>
-        <div class="info-value">${escapeHtml(projectInfo.location)}</div>
-      </div>
-      <div class="info-row">
-        <div class="info-label">Client:</div>
-        <div class="info-value">${escapeHtml(projectInfo.client)}</div>
-      </div>
-      <div class="info-row">
-        <div class="info-label">Inspector:</div>
-        <div class="info-value">${escapeHtml(projectInfo.inspector)}</div>
-      </div>
-      <div class="info-row">
-        <div class="info-label">Inspection Period:</div>
-        <div class="info-value">${projectInfo.dateRange}</div>
-      </div>
-      <div class="info-row">
-        <div class="info-label">Report Generated:</div>
-        <div class="info-value">${new Date().toLocaleDateString('en-GB')} ${new Date().toLocaleTimeString('en-GB')}</div>
-      </div>
-    </div>
-  </div>
 
-  <!-- Summary Statistics -->
-  <div class="summary-stats">
-    <div class="stat-box">
-      <div class="stat-label">Total Items</div>
-      <div class="stat-value">${stats.total}</div>
+    <!-- Summary Statistics -->
+    <div class="summary-stats">
+      <div class="stat-box">
+        <div class="stat-label">Total Items</div>
+        <div class="stat-value">${stats.total}</div>
+      </div>
+      <div class="stat-box pass">
+        <div class="stat-label">Pass</div>
+        <div class="stat-value">${stats.pass}</div>
+      </div>
+      <div class="stat-box fail">
+        <div class="stat-label">Fail</div>
+        <div class="stat-value">${stats.fail}</div>
+      </div>
+      <div class="stat-box pending">
+        <div class="stat-label">Pending</div>
+        <div class="stat-value">${stats.pending}</div>
+      </div>
+      <div class="stat-box critical">
+        <div class="stat-label">Critical</div>
+        <div class="stat-value">${stats.critical}</div>
+      </div>
+      <div class="stat-box major">
+        <div class="stat-label">Major</div>
+        <div class="stat-value">${stats.major}</div>
+      </div>
+      <div class="stat-box minor">
+        <div class="stat-label">Minor</div>
+        <div class="stat-value">${stats.minor}</div>
+      </div>
     </div>
-    <div class="stat-box pass">
-      <div class="stat-label">Pass</div>
-      <div class="stat-value">${stats.pass}</div>
-    </div>
-    <div class="stat-box fail">
-      <div class="stat-label">Fail</div>
-      <div class="stat-value">${stats.fail}</div>
-    </div>
-    <div class="stat-box pending">
-      <div class="stat-label">Pending</div>
-      <div class="stat-value">${stats.pending}</div>
-    </div>
-    <div class="stat-box critical">
-      <div class="stat-label">Critical</div>
-      <div class="stat-value">${stats.critical}</div>
-    </div>
-    <div class="stat-box major">
-      <div class="stat-label">Major</div>
-      <div class="stat-value">${stats.major}</div>
-    </div>
-    <div class="stat-box minor">
-      <div class="stat-label">Minor</div>
-      <div class="stat-value">${stats.minor}</div>
-    </div>
-  </div>
 
-  <!-- Main Inspection Boxes -->
-  <div class="section-header">
-    <h2>CORRECTIVE ACTION REGISTER</h2>
-    <div class="section-line"></div>
-  </div>
-
-  ${inspectionBoxesHtml}
-
-  <!-- Footer -->
-  <div class="report-footer">
-    <div class="footer-left">
-      OCS Group Inspection Division<br>
-      www.ocsgroup.com | info@ocsgroup.com
+    <!-- Area-wise Inspection Sections -->
+    <div class="section-header">
+      <h2>CORRECTIVE ACTION REGISTER - BY AREA</h2>
+      <div class="section-line"></div>
     </div>
-    <div class="footer-right">
-      Confidential Report<br>
-      Page 1 of 1
+
+    ${areaSectionsHtml}
+
+    <!-- Footer -->
+    <div class="report-footer">
+      <div class="footer-left">
+        OCS Group Inspection Division<br>
+        www.ocsgroup.com | info@ocsgroup.com
+      </div>
+      <div class="footer-right">
+        Confidential Report<br>
+        Generated: ${new Date().toLocaleDateString('en-GB')}
+      </div>
     </div>
   </div>
 </body>
 </html>`;
 
     // Launch Puppeteer
-   const browser = await puppeteer.launch({
+     const browser = await puppeteer.launch({
   args: chromium.args,
   executablePath: await chromium.executablePath(),
   headless: chromium.headless,
@@ -1023,7 +1063,20 @@ router.post("/reports/pdf", async (req, res) => {
     const pdfBuffer = await page.pdf({
       format: "A4",
       printBackground: true,
-      margin: { top: "15mm", bottom: "15mm", left: "12mm", right: "12mm" },
+      margin: { top: "20mm", bottom: "20mm", left: "15mm", right: "15mm" },
+      displayHeaderFooter: true,
+      headerTemplate: `
+        <div style="font-size: 8pt; width: 100%; padding: 0 15mm; display: flex; justify-content: space-between; border-bottom: 1px solid #003366;">
+          <span style="color: #003366; font-weight: bold;">DROPS Survey Report</span>
+          <span style="color: #666;">${escapeHtml(projectInfo.asset)}</span>
+        </div>
+      `,
+      footerTemplate: `
+        <div style="font-size: 8pt; width: 100%; padding: 0 15mm; display: flex; justify-content: space-between; color: #666;">
+          <span>OCS Group - Confidential</span>
+          <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
+        </div>
+      `,
     });
 
     await browser.close();
