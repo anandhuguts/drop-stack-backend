@@ -1,6 +1,8 @@
 // routes/reports.js
 import express from "express";
-import puppeteer from "puppeteer";
+import chromium from "@sparticuz/chromium";
+import puppeteer from "puppeteer-core";
+
 import fs from "fs";
 import path from "path";
 
@@ -1006,10 +1008,12 @@ router.post("/reports/pdf", async (req, res) => {
 </html>`;
 
     // Launch Puppeteer
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
+   const browser = await puppeteer.launch({
+  args: chromium.args,
+  executablePath: await chromium.executablePath(),
+  headless: chromium.headless,
+  defaultViewport: chromium.defaultViewport,
+});
     const page = await browser.newPage();
 
     await page.setDefaultNavigationTimeout(60000);

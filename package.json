@@ -9,6 +9,7 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
+    "@sparticuz/chromium": "^141.0.0",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "date-fns": "^4.1.0",
@@ -21,6 +22,7 @@
     "multer-gridfs-storage": "^5.0.2",
     "pdfkit": "^0.17.2",
     "playwright": "^1.56.1",
-    "puppeteer": "^24.30.0"
+    "puppeteer": "^24.30.0",
+    "puppeteer-core": "^24.30.0"
   }
 }
