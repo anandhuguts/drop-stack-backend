@@ -16,20 +16,25 @@ dotenv.config();
 const app = express();
 
 // Increase body size limit for JSON and urlencoded
-app.use(express.json({ limit: "50mb" }));      // for JSON payloads
-app.use(express.urlencoded({ limit: "50mb", extended: true })); // for form data
-app.use("/static", express.static("public"));
-
 app.use(cors({
   origin: [
     'https://drop-stack-iota.vercel.app',
     'http://localhost:3000',
-    'http://localhost:5173' // if using Vite
+    'http://localhost:5173'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+
+// 🌟 FIX: Allow all preflight requests WITH CORS HEADERS
+app.options(/.*/, cors());
+
+
+app.use(express.json({ limit: "50mb" }));      // for JSON payloads
+app.use(express.urlencoded({ limit: "50mb", extended: true })); // for form data
+app.use("/static", express.static("public"));
+
 
 // Handle preflight requests
 

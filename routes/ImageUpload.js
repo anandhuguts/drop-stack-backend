@@ -1,16 +1,18 @@
 // routes/ImageUpload.js
 import express from "express";
 import { upload, uploadToGridFS, getImageStream } from "../config/gridfs.js";
+import { verifyAdmin } from "../middleware/authMiddleware.js";
+
 
 const router = express.Router();
 
 // Upload multiple images
-router.post("/upload/images", upload.array("photos", 10), async (req, res) => {
+router.post("/upload/images",verifyAdmin, upload.array("photos", 10), async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ error: "No images uploaded" });
     }
-
+``
     const ids = [];
     for (let file of req.files) {
       const id = await uploadToGridFS(file);
