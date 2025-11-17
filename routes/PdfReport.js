@@ -2,6 +2,7 @@
 import express from "express";
 import chromium from "@sparticuz/chromium";
 import puppeteer from "puppeteer-core";
+import { ChartJSNodeCanvas } from "chartjs-node-canvas";
 
 const router = express.Router();
 
@@ -151,6 +152,13 @@ function buildInspectionBoxesHtml(inspections, hostBase) {
           </div>
           ` : ''}
         </div>
+        
+        ${i.Observation ? `
+        <div class="observation-row">
+          <div class="comment-label">Observation</div>
+          <div class="comment-text">${escapeHtml(i.Observation)}</div>
+        </div>
+        ` : ''}
       </div>
       `;
     })
@@ -171,6 +179,156 @@ function buildSummaryStats(inspections) {
   return { total, pass, fail, pending, critical, major, minor };
 }
 
+// Generate chart images
+async function generateCharts(groupedInspections) {
+  const width = 800;
+  const height = 500;
+  const chartJSNodeCanvas = new ChartJSNodeCanvas({ width, height, backgroundColour: 'white' });
+
+  // Prepare data for area-wise risk chart
+  const areaNames = Object.keys(groupedInspections);
+  const criticalData = [];
+  const majorData = [];
+  const minorData = [];
+
+  areaNames.forEach(area => {
+    const stats = buildSummaryStats(groupedInspections[area]);
+    criticalData.push(stats.critical);
+    majorData.push(stats.major);
+    minorData.push(stats.minor);
+  });
+
+  // Area-wise Risk Chart (Stacked Bar)
+  const riskChartConfig = {
+    type: 'bar',
+    data: {
+      labels: areaNames,
+      datasets: [
+        {
+          label: 'Critical',
+          data: criticalData,
+          backgroundColor: '#dc2626',
+          borderColor: '#dc2626',
+          borderWidth: 1
+        },
+        {
+          label: 'Major',
+          data: majorData,
+          backgroundColor: '#f97316',
+          borderColor: '#f97316',
+          borderWidth: 1
+        },
+        {
+          label: 'Minor',
+          data: minorData,
+          backgroundColor: '#eab308',
+          borderColor: '#eab308',
+          borderWidth: 1
+        }
+      ]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      plugins: {
+        title: {
+          display: true,
+          text: 'Risk Classification by Area',
+          font: { size: 18, weight: 'bold' }
+        },
+        legend: {
+          position: 'top',
+          labels: { font: { size: 14 } }
+        }
+      },
+      scales: {
+        x: {
+          stacked: true,
+          title: { display: true, text: 'Count', font: { size: 14 } }
+        },
+        y: {
+          stacked: true,
+          ticks: { font: { size: 12 } }
+        }
+      }
+    }
+  };
+
+  const riskChartBuffer = await chartJSNodeCanvas.renderToBuffer(riskChartConfig);
+  const riskChartBase64 = riskChartBuffer.toString('base64');
+
+  // Overall Status Pie Chart
+  const allInspections = Object.values(groupedInspections).flat();
+  const overallStats = buildSummaryStats(allInspections);
+
+  const statusChartConfig = {
+    type: 'pie',
+    data: {
+      labels: ['Pass', 'Fail', 'Pending'],
+      datasets: [{
+        data: [overallStats.pass, overallStats.fail, overallStats.pending],
+        backgroundColor: ['#22c55e', '#ef4444', '#f59e0b'],
+        borderColor: ['#16a34a', '#dc2626', '#d97706'],
+        borderWidth: 2
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        title: {
+          display: true,
+          text: 'Overall Status Distribution',
+          font: { size: 18, weight: 'bold' }
+        },
+        legend: {
+          position: 'bottom',
+          labels: { font: { size: 14 } }
+        }
+      }
+    }
+  };
+
+  const statusChartBuffer = await chartJSNodeCanvas.renderToBuffer(statusChartConfig);
+  const statusChartBase64 = statusChartBuffer.toString('base64');
+
+  // Risk Distribution Doughnut Chart
+  const riskDistConfig = {
+    type: 'doughnut',
+    data: {
+      labels: ['Critical', 'Major', 'Minor'],
+      datasets: [{
+        data: [overallStats.critical, overallStats.major, overallStats.minor],
+        backgroundColor: ['#dc2626', '#f97316', '#eab308'],
+        borderColor: ['#991b1b', '#c2410c', '#a16207'],
+        borderWidth: 2
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        title: {
+          display: true,
+          text: 'Risk Level Distribution',
+          font: { size: 18, weight: 'bold' }
+        },
+        legend: {
+          position: 'bottom',
+          labels: { font: { size: 14 } }
+        }
+      }
+    }
+  };
+
+  const riskDistBuffer = await chartJSNodeCanvas.renderToBuffer(riskDistConfig);
+  const riskDistBase64 = riskDistBuffer.toString('base64');
+
+  return {
+    riskChart: `data:image/png;base64,${riskChartBase64}`,
+    statusChart: `data:image/png;base64,${statusChartBase64}`,
+    riskDistChart: `data:image/png;base64,${riskDistBase64}`
+  };
+}
+
 router.post("/reports/pdf", async (req, res) => {
   try {
     const inspections = Array.isArray(req.body.inspections) ? req.body.inspections : [];
@@ -185,6 +343,9 @@ router.post("/reports/pdf", async (req, res) => {
     const areaSectionsHtml = buildAreaSectionsHtml(groupedInspections, hostBase);
     
     const stats = buildSummaryStats(inspections);
+    
+    // Generate charts
+    const charts = await generateCharts(groupedInspections);
     
     // Get project info from first inspection
     const projectInfo = {
@@ -206,7 +367,7 @@ router.post("/reports/pdf", async (req, res) => {
   <style>
     @page {
       size: A4;
-      margin: 20mm 15mm;
+      margin: 0;
     }
     
     * {
@@ -218,37 +379,19 @@ router.post("/reports/pdf", async (req, res) => {
     body {
       font-family: 'Calibri', 'Arial', sans-serif;
       font-size: 9pt;
-      line-height: 1.4;
+      line-height: 1.3;
       color: #000;
+      margin: 0;
+      padding: 0;
     }
     
-    /* Page Header - appears on every page */
-    @page {
-      @top-center {
-        content: element(pageHeader);
-      }
+    /* Page Container */
+    .page {
+      padding: 15mm 12mm;
     }
     
-    .page-header {
-      position: running(pageHeader);
-      border-bottom: 2px solid #003366;
-      padding-bottom: 8px;
-      margin-bottom: 15px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    
-    .page-header-left {
-      font-weight: bold;
-      font-size: 10pt;
-      color: #003366;
-    }
-    
-    .page-header-right {
-      text-align: right;
-      font-size: 8pt;
-      color: #666;
+    .page-with-header {
+      padding-top: 20mm;
     }
     
     /* Cover Page */
@@ -260,15 +403,14 @@ router.post("/reports/pdf", async (req, res) => {
       justify-content: center;
       text-align: center;
       page-break-after: always;
-      padding: 60px 40px;
+      padding: 40px;
     }
     
     .cover-logo {
       width: 400px;
       height: 200px;
-      margin-bottom: 50px;
-      background: #f5f5f5;
-      border: 2px solid #ddd;
+      margin-bottom: 40px;
+      background: #f0f0f0;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -276,77 +418,79 @@ router.post("/reports/pdf", async (req, res) => {
       font-size: 14pt;
     }
     
+    .logo-img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+    
     .cover-title {
-      font-size: 36pt;
+      font-size: 32pt;
       font-weight: bold;
-      margin-bottom: 40px;
-      color: #003366;
-      letter-spacing: 2px;
+      margin-bottom: 60px;
+      color: #000;
     }
     
     .cover-date {
-      font-size: 22pt;
-      font-weight: 600;
-      margin-bottom: 30px;
-      color: #333;
+      font-size: 24pt;
+      font-weight: bold;
+      margin-bottom: 40px;
     }
     
     .cover-client {
-      font-size: 16pt;
+      font-size: 18pt;
       font-weight: bold;
-      margin-bottom: 20px;
+      margin-bottom: 30px;
       text-transform: uppercase;
-      color: #666;
     }
     
     .cover-project {
       font-size: 20pt;
       font-weight: bold;
-      margin-bottom: 60px;
+      margin-bottom: 50px;
       text-transform: uppercase;
-      color: #003366;
     }
     
     .cover-footer {
-      font-size: 11pt;
-      margin-top: auto;
-      color: #666;
+      font-size: 12pt;
+      margin-top: 40px;
     }
     
     .cover-footer-line {
-      font-weight: 600;
-      margin-bottom: 15px;
+      font-weight: bold;
+      margin-bottom: 20px;
     }
     
     .cover-footer-contact {
-      color: #0066cc;
-      font-size: 12pt;
+      color: #0088cc;
+      font-size: 14pt;
     }
     
     /* Quality Assurance Page */
     .qa-page {
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
       page-break-after: always;
-      padding: 40px 30px;
+      padding: 40px;
     }
     
     .qa-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 50px;
-      padding-bottom: 20px;
-      border-bottom: 2px solid #003366;
+      margin-bottom: 60px;
     }
     
-    .qa-logo {
-      width: 160px;
-      height: 70px;
-      background: #f5f5f5;
-      border: 2px solid #ddd;
+    .qa-logo-left, .qa-logo-right {
+      width: 180px;
+      height: 80px;
+      background: #f0f0f0;
+      border: 2px dashed #ccc;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 9pt;
+      font-size: 10pt;
       color: #999;
     }
     
@@ -354,38 +498,32 @@ router.post("/reports/pdf", async (req, res) => {
       text-align: center;
       font-size: 24pt;
       font-weight: bold;
-      margin-bottom: 30px;
-      color: #003366;
+      margin-bottom: 40px;
     }
     
     .qa-description {
       text-align: center;
       font-size: 11pt;
-      margin-bottom: 50px;
-      line-height: 1.6;
-      color: #333;
+      margin-bottom: 60px;
     }
     
     .qa-signatures {
-      width: 100%;
-      max-width: 650px;
-      margin: 0 auto 50px;
-      border: 2px solid #003366;
+      width: 600px;
+      margin: 0 auto 60px;
+      border: 2px solid #000;
     }
     
     .qa-sig-header {
       text-align: center;
-      padding: 15px;
-      border-bottom: 2px solid #003366;
+      padding: 12px;
+      border-bottom: 2px solid #000;
       font-weight: bold;
-      background: #f5f5f5;
-      font-size: 10pt;
     }
     
     .qa-sig-row {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      border-bottom: 2px solid #003366;
+      border-bottom: 2px solid #000;
     }
     
     .qa-sig-row:last-child {
@@ -393,81 +531,111 @@ router.post("/reports/pdf", async (req, res) => {
     }
     
     .qa-sig-cell {
-      padding: 30px 20px;
+      padding: 20px;
       text-align: center;
-      border-right: 2px solid #003366;
+      border-right: 2px solid #000;
       font-weight: bold;
-      min-height: 80px;
     }
     
     .qa-sig-cell:last-child {
       border-right: none;
     }
     
+    .qa-footer {
+      display: flex;
+      justify-content: space-between;
+      margin-top: auto;
+      font-size: 9pt;
+    }
+    
+    .qa-footer-item {
+      margin-bottom: 8px;
+    }
+    
+    .qa-footer-label {
+      font-weight: bold;
+      display: inline-block;
+      width: 140px;
+    }
+    
     .qa-bottom-table {
-      margin-top: 50px;
+      margin-top: 40px;
       width: 100%;
-      border: 2px solid #003366;
+      border: 2px solid #000;
       border-collapse: collapse;
     }
     
     .qa-bottom-table td {
-      padding: 12px 15px;
-      border: 1px solid #003366;
+      padding: 12px;
+      border: 1px solid #000;
       font-size: 9pt;
     }
     
     .qa-bottom-label {
       font-weight: bold;
-      background: #f5f5f5;
-      width: 140px;
+      width: 120px;
     }
     
     /* Definitions Page */
     .definitions-page {
       page-break-after: always;
-      padding: 30px;
+      padding: 40px;
+    }
+    
+    .def-header {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: 30px;
+    }
+    
+    .def-logo {
+      width: 120px;
+      height: 60px;
+      background: #f0f0f0;
+      border: 2px dashed #ccc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 8pt;
+      color: #999;
     }
     
     .def-title {
       text-align: center;
-      font-size: 20pt;
+      font-size: 18pt;
       font-weight: bold;
-      margin-bottom: 8px;
-      color: #003366;
+      margin-bottom: 10px;
     }
     
     .def-subtitle {
       text-align: center;
       font-size: 16pt;
       font-weight: bold;
-      margin-bottom: 35px;
-      color: #666;
+      margin-bottom: 30px;
     }
     
     .def-section {
-      margin-bottom: 35px;
+      margin-bottom: 30px;
     }
     
     .def-section-title {
       text-align: center;
-      font-size: 12pt;
+      font-size: 14pt;
       font-weight: bold;
-      padding: 12px;
-      border: 2px solid #003366;
-      background: #f5f5f5;
-      color: #003366;
+      padding: 10px;
+      border: 2px solid #000;
+      background: #f0f0f0;
     }
     
     .def-table {
       width: 100%;
-      border: 2px solid #003366;
+      border: 2px solid #000;
       border-top: none;
       border-collapse: collapse;
     }
     
     .def-table tr {
-      border-bottom: 1px solid #003366;
+      border-bottom: 2px solid #000;
     }
     
     .def-table tr:last-child {
@@ -476,16 +644,14 @@ router.post("/reports/pdf", async (req, res) => {
     
     .def-table td:first-child {
       width: 150px;
-      padding: 15px;
+      padding: 12px;
       text-align: center;
       font-weight: bold;
-      border-right: 2px solid #003366;
-      background: #f9f9f9;
+      border-right: 2px solid #000;
     }
     
     .def-table td:last-child {
-      padding: 15px 20px;
-      line-height: 1.5;
+      padding: 12px;
     }
     
     .def-critical { color: #dc2626; }
@@ -498,28 +664,110 @@ router.post("/reports/pdf", async (req, res) => {
     .def-no-access { color: #94a3b8; }
     
     .def-footer {
-      margin-top: 40px;
+      margin-top: 30px;
       width: 100%;
-      border: 2px solid #003366;
+      border: 2px solid #000;
       border-collapse: collapse;
     }
     
     .def-footer td {
-      padding: 12px 15px;
-      border: 1px solid #003366;
+      padding: 12px;
+      border: 1px solid #000;
       font-size: 9pt;
     }
     
     .def-footer-label {
       font-weight: bold;
-      background: #f5f5f5;
-      width: 140px;
+      width: 120px;
+    }
+    
+    /* Analytics Page */
+    .analytics-page {
+      page-break-after: always;
+      padding: 40px;
+    }
+    
+    .analytics-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 30px;
+      padding-bottom: 20px;
+      border-bottom: 2px solid #003366;
+    }
+    
+    .analytics-logo {
+      width: 120px;
+      height: 60px;
+      background: #f0f0f0;
+      border: 2px dashed #ccc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 8pt;
+      color: #999;
+    }
+    
+    .analytics-title-section {
+      flex: 1;
+      text-align: center;
+    }
+    
+    .analytics-main-title {
+      font-size: 22pt;
+      font-weight: bold;
+      color: #003366;
+      margin-bottom: 5px;
+    }
+    
+    .analytics-subtitle {
+      font-size: 12pt;
+      color: #666;
+    }
+    
+    .chart-container {
+      margin-bottom: 40px;
+      text-align: center;
+    }
+    
+    .chart-container img {
+      max-width: 100%;
+      height: auto;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 10px;
+      background: white;
+    }
+    
+    .chart-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 30px;
+      margin-bottom: 40px;
+    }
+    
+    .analytics-footer {
+      margin-top: auto;
+      width: 100%;
+      border: 2px solid #000;
+      border-collapse: collapse;
+    }
+    
+    .analytics-footer td {
+      padding: 12px;
+      border: 1px solid #000;
+      font-size: 9pt;
+    }
+    
+    .analytics-footer-label {
+      font-weight: bold;
+      width: 120px;
     }
     
     /* Report Header */
     .report-header {
-      border: 2px solid #003366;
-      padding: 15px;
+      border: 2px solid #000;
+      padding: 12px;
       margin-bottom: 20px;
       background: #f5f5f5;
     }
@@ -528,9 +776,9 @@ router.post("/reports/pdf", async (req, res) => {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      border-bottom: 2px solid #003366;
-      padding-bottom: 10px;
-      margin-bottom: 12px;
+      border-bottom: 1px solid #666;
+      padding-bottom: 8px;
+      margin-bottom: 8px;
     }
     
     .header-logo {
@@ -539,11 +787,14 @@ router.post("/reports/pdf", async (req, res) => {
       color: #003366;
     }
     
+    .header-title {
+      text-align: right;
+    }
+    
     .header-title h1 {
       font-size: 14pt;
       font-weight: bold;
-      margin-bottom: 5px;
-      color: #003366;
+      margin-bottom: 4px;
     }
     
     .header-title .subtitle {
@@ -554,19 +805,17 @@ router.post("/reports/pdf", async (req, res) => {
     .header-info {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      font-size: 9pt;
+      gap: 8px;
+      font-size: 8pt;
     }
     
     .info-row {
       display: flex;
-      line-height: 1.6;
     }
     
     .info-label {
       font-weight: bold;
-      width: 120px;
-      color: #003366;
+      width: 100px;
     }
     
     .info-value {
@@ -577,13 +826,13 @@ router.post("/reports/pdf", async (req, res) => {
     .summary-stats {
       display: grid;
       grid-template-columns: repeat(7, 1fr);
-      gap: 10px;
-      margin-bottom: 25px;
+      gap: 8px;
+      margin-bottom: 16px;
     }
     
     .stat-box {
       border: 2px solid #003366;
-      padding: 12px 8px;
+      padding: 8px;
       text-align: center;
       background: white;
     }
@@ -593,12 +842,11 @@ router.post("/reports/pdf", async (req, res) => {
       font-weight: bold;
       color: #666;
       text-transform: uppercase;
-      margin-bottom: 6px;
-      letter-spacing: 0.5px;
+      margin-bottom: 4px;
     }
     
     .stat-value {
-      font-size: 18pt;
+      font-size: 16pt;
       font-weight: bold;
       color: #003366;
     }
@@ -616,7 +864,7 @@ router.post("/reports/pdf", async (req, res) => {
     }
     
     .section-header h2 {
-      font-size: 13pt;
+      font-size: 12pt;
       font-weight: bold;
       color: #003366;
       text-transform: uppercase;
@@ -624,9 +872,9 @@ router.post("/reports/pdf", async (req, res) => {
     }
     
     .section-line {
-      height: 3px;
+      height: 2px;
       background: #003366;
-      margin-top: 6px;
+      margin-top: 4px;
     }
     
     /* Area Section Styles */
@@ -636,41 +884,45 @@ router.post("/reports/pdf", async (req, res) => {
     }
     
     .area-header {
-      background: #003366;
-      color: white;
+      background: white;
+      color: #000;
       padding: 15px 20px;
-      margin-bottom: 15px;
+      margin-bottom: 16px;
+      border: 2px solid #000;
+      border-radius: 0;
       display: flex;
       justify-content: space-between;
       align-items: center;
     }
     
     .area-title {
-      font-size: 13pt;
+      font-size: 14pt;
       font-weight: bold;
       margin: 0;
+      color: #000;
     }
     
     .area-stats {
       display: flex;
-      gap: 12px;
+      gap: 18px;
       font-size: 9pt;
     }
     
     .area-stat {
       padding: 5px 10px;
-      background: rgba(255, 255, 255, 0.2);
-      border-radius: 3px;
-      font-weight: 600;
+      background: #f0f0f0;
+      border-radius: 4px;
+      font-weight: bold;
+      color: #000;
     }
     
-    .area-stat.pass { background: #22c55e; }
-    .area-stat.fail { background: #ef4444; }
+    .area-stat.pass { background: #22c55e; color: white; }
+    .area-stat.fail { background: #ef4444; color: white; }
     
     /* Inspection Box Styles */
     .inspection-box {
-      border: 2px solid #003366;
-      margin-bottom: 25px;
+      border: 2px solid #000;
+      margin-bottom: 24px;
       page-break-inside: avoid;
       background: white;
     }
@@ -678,45 +930,52 @@ router.post("/reports/pdf", async (req, res) => {
     .inspection-header {
       display: grid;
       grid-template-columns: repeat(12, 1fr);
-      border-bottom: 2px solid #003366;
+      border-bottom: 2px solid #000;
     }
     
-    .header-cell {
-      padding: 10px 6px;
-      border-right: 1px solid #003366;
-      font-size: 7pt;
-      text-align: center;
-      background: #f9f9f9;
-      line-height: 1.4;
-    }
+   .header-cell {
+  padding: 14px 8px; /* More breathing space */
+  border-right: 1px solid #000;
+  font-size: 8pt;
+  text-align: center;
+  background: white;
+  line-height: 1.35; /* Better vertical alignment */
+  vertical-align: middle;
+  min-height: 42px; /* Makes cells equally tall */
+}
+
     
     .header-cell:last-child {
       border-right: none;
     }
     
-    .header-cell strong {
-      display: block;
-      margin-bottom: 4px;
-      font-size: 6pt;
-      color: #666;
-      text-transform: uppercase;
-    }
-    
+   .header-cell strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 8pt;
+  line-height: 1.2;
+  color: #000;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.25px;
+}
+
     /* Photos Section */
     .photos-section {
       display: flex;
-      gap: 12px;
+      gap: 10px;
       padding: 15px;
-      border-bottom: 2px solid #003366;
+      border-bottom: 2px solid #000;
       background: #fafafa;
       flex-wrap: wrap;
+      justify-content: flex-start;
     }
     
     .inspection-photo {
-      width: 200px;
-      height: 200px;
+      width: 180px;
+      height: 180px;
       object-fit: cover;
-      border: 2px solid #ddd;
+      border: 2px solid #ccc;
       border-radius: 4px;
     }
     
@@ -728,11 +987,11 @@ router.post("/reports/pdf", async (req, res) => {
     }
     
     .comment-box {
-      padding: 12px 15px;
-      border-right: 1px solid #003366;
-      border-bottom: 1px solid #003366;
+      padding: 12px;
+      border-right: 1px solid #000;
+      border-bottom: 1px solid #000;
       font-size: 8pt;
-      line-height: 1.5;
+      min-height: 60px;
     }
     
     .comment-box:nth-child(2n) {
@@ -747,24 +1006,29 @@ router.post("/reports/pdf", async (req, res) => {
     .comment-label {
       font-weight: bold;
       margin-bottom: 6px;
-      color: #003366;
+      color: #000;
       font-size: 8pt;
       text-transform: uppercase;
-      letter-spacing: 0.3px;
     }
     
     .comment-text {
       font-size: 8pt;
-      line-height: 1.5;
+      line-height: 1.4;
       color: #333;
+    }
+    
+    .observation-row {
+      padding: 12px;
+      border-top: 2px solid #000;
+      background: #fffbf0;
     }
     
     /* Badges */
     .badge {
       display: inline-block;
       padding: 4px 10px;
-      border-radius: 3px;
-      font-size: 7pt;
+      border-radius: 4px;
+      font-size: 8pt;
       font-weight: bold;
       text-transform: uppercase;
       white-space: nowrap;
@@ -783,17 +1047,17 @@ router.post("/reports/pdf", async (req, res) => {
     
     /* Footer */
     .report-footer {
-      margin-top: 40px;
-      padding-top: 15px;
+      margin-top: 30px;
+      padding-top: 12px;
       border-top: 2px solid #003366;
-      font-size: 8pt;
+      font-size: 7pt;
       color: #666;
       display: flex;
       justify-content: space-between;
     }
     
     .footer-left {
-      font-weight: 600;
+      font-weight: bold;
     }
     
     .footer-right {
@@ -807,12 +1071,11 @@ router.post("/reports/pdf", async (req, res) => {
     
     /* Print Optimization */
     @media print {
-      body { 
-        -webkit-print-color-adjust: exact; 
-        print-color-adjust: exact; 
-      }
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       .inspection-box { page-break-inside: avoid; }
       .area-section { page-break-inside: avoid; }
+      .inspection-photo { -webkit-print-color-adjust: exact; }
+      .area-header { -webkit-print-color-adjust: exact; }
     }
   </style>
 </head>
@@ -820,14 +1083,14 @@ router.post("/reports/pdf", async (req, res) => {
   <!-- Cover Page -->
   <div class="cover-page">
     <div class="cover-logo">
-      <img src="${hostBase}/static/e28805cb-6174-4d0d-960b-b4bef57acca3 (1).png" style="max-width: 100%; max-height: 100%; object-fit: contain;" />
+      <img src="${hostBase}/static/e28805cb-6174-4d0d-960b-b4bef57acca3 (1).png" class="logo-img" alt="Company Logo" />
     </div>
     
-    <div class="cover-title">DROPS REGISTER</div>
+    <div class="cover-title">Drops Register</div>
     
     <div class="cover-date">${new Date(inspections[0]?.DateInspected || Date.now()).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()}</div>
     
-    <div class="cover-client">${escapeHtml(projectInfo.client)}</div>
+    <div class="cover-client">${escapeHtml(projectInfo.client || "HAZTECH SOLUTIONS")}</div>
     
     <div class="cover-project">${escapeHtml(projectInfo.asset)}</div>
     
@@ -840,8 +1103,8 @@ router.post("/reports/pdf", async (req, res) => {
   <!-- Quality Assurance Page -->
   <div class="qa-page">
     <div class="qa-header">
-      <div class="qa-logo">[OCS Logo]</div>
-      <div class="qa-logo">[Client Logo]</div>
+      <div class="qa-logo-left">[OCS Logo]</div>
+      <div class="qa-logo-right">[Client Logo]</div>
     </div>
     
     <div class="qa-title">QUALITY ASSURANCE</div>
@@ -851,7 +1114,7 @@ router.post("/reports/pdf", async (req, res) => {
     </div>
     
     <div class="qa-signatures">
-      <div class="qa-sig-header">THREE SIGNATURES REQUIRED</div>
+      <div class="qa-sig-header">(3 signatures required)</div>
       <div class="qa-sig-row">
         <div class="qa-sig-cell">PROJECT MANAGEMENT</div>
         <div class="qa-sig-cell"></div>
@@ -866,13 +1129,40 @@ router.post("/reports/pdf", async (req, res) => {
       </div>
     </div>
     
+    <div class="qa-footer">
+      <div>
+        <div class="qa-footer-item">
+          <span class="qa-footer-label">Document Title:</span> Doc 1.0
+        </div>
+        <div class="qa-footer-item">
+          <span class="qa-footer-label">Document Number:</span> 1
+        </div>
+      </div>
+      <div>
+        <div class="qa-footer-item">
+          <span class="qa-footer-label">Revised By:</span> Anna
+        </div>
+        <div class="qa-footer-item">
+          <span class="qa-footer-label">Revision:</span> Anna
+        </div>
+      </div>
+      <div>
+        <div class="qa-footer-item">
+          <span class="qa-footer-label">Approved By:</span> Mark Tranfield
+        </div>
+        <div class="qa-footer-item">
+          <span class="qa-footer-label">Approval Date:</span> 06-Nov-17
+        </div>
+      </div>
+    </div>
+    
     <table class="qa-bottom-table">
       <tr>
         <td class="qa-bottom-label">Asset</td>
         <td>${escapeHtml(projectInfo.asset)}</td>
         <td class="qa-bottom-label">Inspected By</td>
         <td>${escapeHtml(projectInfo.inspector)}</td>
-        <td colspan="2">www.ocsgroup.com | info@ocsgroup.com</td>
+        <td colspan="2">${escapeHtml("www.ocsgroup.com | info@ocsgroup.com")}</td>
       </tr>
       <tr>
         <td class="qa-bottom-label">Inspection Date</td>
@@ -887,6 +1177,10 @@ router.post("/reports/pdf", async (req, res) => {
 
   <!-- Definitions Page -->
   <div class="definitions-page">
+    <div class="def-header">
+      <div class="def-logo">[Client Logo]</div>
+    </div>
+    
     <div class="def-title">DROPS AREA EQUIPMENT REGISTER</div>
     <div class="def-subtitle">DEFINITIONS</div>
     
@@ -895,15 +1189,15 @@ router.post("/reports/pdf", async (req, res) => {
       <table class="def-table">
         <tr>
           <td class="def-critical">CRITICAL</td>
-          <td>A defect identified in Zone 0 that compromises the hazardous area design and integrity of the equipment that if left uncorrected may lead to equipment failure, asset damage, personal injury or death.</td>
+          <td>A defect identified in Zone 0 that compromises the hazardous area design and integrity of the equipment that if left uncorrected may lead equipment failure, Asset damage, personal injury or death. See example sheet.</td>
         </tr>
         <tr>
           <td class="def-major">MAJOR</td>
-          <td>A defect identified in Zone 1 that could compromise the integrity of the equipment, that if left uncorrected may lead to equipment failure, asset damage, personal injury or death.</td>
+          <td>A defect identified in Zone 1 that could compromise the integrity of the equipment, that if left uncorrected may lead to equipment failure, Asset damage, personal injury or death. See example sheet.</td>
         </tr>
         <tr>
           <td class="def-minor">MINOR</td>
-          <td>A defect identified in Zone 2 that compromises the regulatory suitability of the equipment.</td>
+          <td>A defect identified in Zone 2 that compromises the regulatory suitability of the equipment. See example sheet.</td>
         </tr>
         <tr>
           <td class="def-observation">OBSERVATION</td>
@@ -940,7 +1234,7 @@ router.post("/reports/pdf", async (req, res) => {
         <td>${escapeHtml(projectInfo.asset)}</td>
         <td class="def-footer-label">Inspected By</td>
         <td>${escapeHtml(projectInfo.inspector)}</td>
-        <td colspan="2">www.ocsgroup.com | info@ocsgroup.com</td>
+        <td colspan="2">${escapeHtml("www.ocsgroup.com | info@ocsgroup.com")}</td>
       </tr>
       <tr>
         <td class="def-footer-label">Inspection Date</td>
@@ -953,9 +1247,54 @@ router.post("/reports/pdf", async (req, res) => {
     </table>
   </div>
 
+  <!-- Analytics Page with Charts -->
+  <div class="analytics-page">
+    <div class="analytics-header">
+      <div class="analytics-logo">[Client Logo]</div>
+      <div class="analytics-title-section">
+        <div class="analytics-main-title">INSPECTION ANALYTICS</div>
+        <div class="analytics-subtitle">Visual Summary of Risk and Status Distribution</div>
+      </div>
+      <div class="analytics-logo">[OCS Logo]</div>
+    </div>
+    
+    <!-- Main Area Risk Chart -->
+    <div class="chart-container">
+      <img src="${charts.riskChart}" alt="Risk Classification by Area" />
+    </div>
+    
+    <!-- Status and Risk Distribution Grid -->
+    <div class="chart-grid">
+      <div class="chart-container">
+        <img src="${charts.statusChart}" alt="Overall Status Distribution" />
+      </div>
+      <div class="chart-container">
+        <img src="${charts.riskDistChart}" alt="Risk Level Distribution" />
+      </div>
+    </div>
+    
+    <table class="analytics-footer">
+      <tr>
+        <td class="analytics-footer-label">Asset</td>
+        <td>${escapeHtml(projectInfo.asset)}</td>
+        <td class="analytics-footer-label">Inspected By</td>
+        <td>${escapeHtml(projectInfo.inspector)}</td>
+        <td colspan="2">${escapeHtml("www.ocsgroup.com | info@ocsgroup.com")}</td>
+      </tr>
+      <tr>
+        <td class="analytics-footer-label">Inspection Date</td>
+        <td>${new Date(inspections[0]?.DateInspected || Date.now()).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</td>
+        <td class="analytics-footer-label">QA Review</td>
+        <td>Anna</td>
+        <td class="analytics-footer-label">Page No</td>
+        <td>4</td>
+      </tr>
+    </table>
+  </div>
+
   <!-- Data Pages -->
-  <div class="page">
-    <!-- Report Header -->
+  <div class="page page-with-header">
+    <!-- Header -->
     <div class="report-header">
       <div class="header-top">
         <div class="header-logo">OCS GROUP</div>
@@ -1040,7 +1379,7 @@ router.post("/reports/pdf", async (req, res) => {
       </div>
       <div class="footer-right">
         Confidential Report<br>
-        Generated: ${new Date().toLocaleDateString('en-GB')}
+        Page 5+ of ${Math.ceil(inspections.length / 10) + 4}
       </div>
     </div>
   </div>
@@ -1063,20 +1402,7 @@ router.post("/reports/pdf", async (req, res) => {
     const pdfBuffer = await page.pdf({
       format: "A4",
       printBackground: true,
-      margin: { top: "20mm", bottom: "20mm", left: "15mm", right: "15mm" },
-      displayHeaderFooter: true,
-      headerTemplate: `
-        <div style="font-size: 8pt; width: 100%; padding: 0 15mm; display: flex; justify-content: space-between; border-bottom: 1px solid #003366;">
-          <span style="color: #003366; font-weight: bold;">DROPS Survey Report</span>
-          <span style="color: #666;">${escapeHtml(projectInfo.asset)}</span>
-        </div>
-      `,
-      footerTemplate: `
-        <div style="font-size: 8pt; width: 100%; padding: 0 15mm; display: flex; justify-content: space-between; color: #666;">
-          <span>OCS Group - Confidential</span>
-          <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>
-        </div>
-      `,
+      margin: { top: "15mm", bottom: "15mm", left: "12mm", right: "12mm" }
     });
 
     await browser.close();
