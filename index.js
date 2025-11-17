@@ -319,6 +319,22 @@ app.get("/inspections/:id", verifyAdmin, async (req, res) => {
   }
 });
 
+// Delete inspection by ID
+app.delete("/inspections/:id", verifyAdmin, async (req, res) => {
+  try {
+    const inspection = await Inspection.findByIdAndDelete(req.params.id);
+
+    if (!inspection) {
+      return res.status(404).json({ error: "Inspection not found" });
+    }
+
+    res.json({ message: "Inspection deleted successfully", deleted: inspection });
+  } catch (err) {
+    console.error("Delete inspection error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 
 // Update inspection
