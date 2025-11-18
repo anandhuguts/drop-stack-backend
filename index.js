@@ -9,6 +9,7 @@ import rigRoutes from "./routes/rigs.js";
 import inspectorRoutes from "./routes/InspectorRoute.js";
 import pdfRoutes from "./routes/PdfGenerator.js";
 import pdfReportRoutes from "./routes/PdfReport.js";
+import pdfReportSecondaryRoutes from "./routes/pdfReportSecondary.js";
 import imageUploadRoutes from "./routes/ImageUpload.js";
 
 dotenv.config();
@@ -16,36 +17,39 @@ dotenv.config();
 const app = express();
 
 // Increase body size limit for JSON and urlencoded
-app.use(cors({
-  origin: [
-    'https://drop-stack-iota.vercel.app',
-    'http://localhost:3000',
-    'http://localhost:5173'
-  ],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
+app.use(
+  cors({
+    origin: [
+      "https://drop-stack-iota.vercel.app",
+      "http://localhost:3000",
+      "http://localhost:5173",
+    ],
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
 
 // 🌟 FIX: Allow all preflight requests WITH CORS HEADERS
 app.options(/.*/, cors());
 
-
-app.use(express.json({ limit: "50mb" }));      // for JSON payloads
+app.use(express.json({ limit: "50mb" })); // for JSON payloads
 app.use(express.urlencoded({ limit: "50mb", extended: true })); // for form data
 app.use(express.static("public"));
 
-
-
 // Handle preflight requests
 
-console.log("Loaded env vars:", process.env.ADMIN_EMAIL, process.env.ADMIN_PASSWORD ? "Password loaded" : "Password missing");
-
+console.log(
+  "Loaded env vars:",
+  process.env.ADMIN_EMAIL,
+  process.env.ADMIN_PASSWORD ? "Password loaded" : "Password missing"
+);
 
 // MongoDB connection
-mongoose.connect(process.env.MONGO_URI)
-.then(() => console.log("✅ MongoDB connected"))
-.catch(err => console.log(err));
+mongoose
+  .connect(process.env.MONGO_URI)
+  .then(() => console.log("✅ MongoDB connected"))
+  .catch((err) => console.log(err));
 
 // Test route
 app.get("/", (req, res) => {
@@ -53,7 +57,6 @@ app.get("/", (req, res) => {
 });
 
 app.use("/api", imageUploadRoutes);
-
 
 // Login route (public)
 app.use("/api/auth", authRoutes);
@@ -64,7 +67,7 @@ app.use("/api/auth", authRoutes);
 app.post("/inspections", verifyAdmin, async (req, res) => {
   try {
     const {
-       photos,
+      photos,
       EquipNumber,
       EquipmentName,
       AreaName,
@@ -174,7 +177,6 @@ app.get("/inspections", verifyAdmin, async (req, res) => {
   }
 });
 
-
 // Add this after your inspection routes
 app.get("/api/inspections/stats", verifyAdmin, async (req, res) => {
   try {
@@ -256,8 +258,6 @@ app.get("/api/inspections/stats", verifyAdmin, async (req, res) => {
   }
 });
 
-
-
 // Delete all old inspections before importing new ones
 app.post("/inspections/import", verifyAdmin, async (req, res) => {
   try {
@@ -292,7 +292,6 @@ app.post("/inspections/import", verifyAdmin, async (req, res) => {
       skipped: skippedCount,
       totalInExcel: inspections.length,
     });
-
   } catch (error) {
     console.error("❌ Import error:", error);
     return res.status(500).json({
@@ -302,13 +301,13 @@ app.post("/inspections/import", verifyAdmin, async (req, res) => {
   }
 });
 
-
-
 // Get inspection by ID
 app.get("/inspections/:id", verifyAdmin, async (req, res) => {
   try {
-    const inspection = await Inspection.findById(req.params.id)
-      .populate("inspectors", "name specialties");
+    const inspection = await Inspection.findById(req.params.id).populate(
+      "inspectors",
+      "name specialties"
+    );
 
     if (!inspection) {
       return res.status(404).json({ error: "Inspection not found" });
@@ -329,14 +328,15 @@ app.delete("/inspections/:id", verifyAdmin, async (req, res) => {
       return res.status(404).json({ error: "Inspection not found" });
     }
 
-    res.json({ message: "Inspection deleted successfully", deleted: inspection });
+    res.json({
+      message: "Inspection deleted successfully",
+      deleted: inspection,
+    });
   } catch (err) {
     console.error("Delete inspection error:", err);
     res.status(500).json({ error: err.message });
   }
 });
-
-
 
 // Update inspection
 // Update inspection
@@ -347,7 +347,9 @@ app.put("/inspections/:id", verifyAdmin, async (req, res) => {
 
     // ⭐ If photos were included, update them
     if (updates.photos && Array.isArray(updates.photos)) {
-      updates.photos = updates.photos.map((id) => new mongoose.Types.ObjectId(id));
+      updates.photos = updates.photos.map(
+        (id) => new mongoose.Types.ObjectId(id)
+      );
     }
 
     const updatedInspection = await Inspection.findByIdAndUpdate(
@@ -361,13 +363,11 @@ app.put("/inspections/:id", verifyAdmin, async (req, res) => {
     }
 
     res.json(updatedInspection);
-
   } catch (err) {
     console.error("Inspection update error:", err);
     res.status(500).json({ error: err.message });
   }
 });
-
 
 // Seed inspections (reset and add)
 app.post("/api/seed-inspections", async (req, res) => {
@@ -395,12 +395,14 @@ app.post("/api/seed-inspections", async (req, res) => {
   }
 });
 
-
 // Additional modules
 app.use("/api", verifyAdmin, rigRoutes);
 app.use("/api", verifyAdmin, inspectorRoutes);
 app.use("/api", verifyAdmin, pdfRoutes);
 app.use("/api", verifyAdmin, pdfReportRoutes);
+app.use("/api", verifyAdmin, pdfReportSecondaryRoutes);
 // Server start
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
+app.listen(PORT, () =>
+  console.log(`🚀 Server running on http://localhost:${PORT}`)
+);

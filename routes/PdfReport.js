@@ -1,5 +1,6 @@
 import express from "express";
-import puppeteer from "puppeteer";
+import chromium from "@sparticuz/chromium";
+import puppeteer from "puppeteer-core";
 import { ChartJSNodeCanvas } from "chartjs-node-canvas"; // chart rendering
 
 const router = express.Router();
@@ -26,7 +27,7 @@ async function generateAreaSummaryChart(inspections) {
   // Group by AreaName + count RiskName types
   const areaStats = {};
 
-  inspections.forEach(item => {
+  inspections.forEach((item) => {
     const area = item.AreaName || "UNSPECIFIED";
     const risk = (item.RiskName || "UNSPECIFIED").toUpperCase();
 
@@ -44,24 +45,24 @@ async function generateAreaSummaryChart(inspections) {
   const datasets = [
     {
       label: "Observation",
-      data: labels.map(area => areaStats[area].OBSERVATION),
-      backgroundColor: "#00A651"
+      data: labels.map((area) => areaStats[area].OBSERVATION),
+      backgroundColor: "#00A651",
     },
     {
       label: "Minor",
-      data: labels.map(area => areaStats[area].MINOR),
-      backgroundColor: "#1E64C8"
+      data: labels.map((area) => areaStats[area].MINOR),
+      backgroundColor: "#1E64C8",
     },
     {
       label: "Major",
-      data: labels.map(area => areaStats[area].MAJOR),
-      backgroundColor: "#F4A259"
+      data: labels.map((area) => areaStats[area].MAJOR),
+      backgroundColor: "#F4A259",
     },
     {
       label: "Critical",
-      data: labels.map(area => areaStats[area].CRITICAL),
-      backgroundColor: "#E10600"
-    }
+      data: labels.map((area) => areaStats[area].CRITICAL),
+      backgroundColor: "#E10600",
+    },
   ];
 
   const configuration = {
@@ -75,21 +76,21 @@ async function generateAreaSummaryChart(inspections) {
         title: {
           display: true,
           text: "Area Based Dropped Object Overall Summary",
-          font: { size: 20, weight: "bold" }
-        }
+          font: { size: 20, weight: "bold" },
+        },
       },
       scales: {
         x: {
           stacked: true,
-          ticks: { maxRotation: 75, minRotation: 45 }
+          ticks: { maxRotation: 75, minRotation: 45 },
         },
         y: {
           stacked: true,
           beginAtZero: true,
-          ticks: { stepSize: 1 }
-        }
-      }
-    }
+          ticks: { stepSize: 1 },
+        },
+      },
+    },
   };
 
   const imgBuffer = await chartJSNodeCanvas.renderToBuffer(configuration);
@@ -97,14 +98,17 @@ async function generateAreaSummaryChart(inspections) {
 }
 
 async function generateCorrectiveActionChart(inspections) {
-  const correctiveItems = inspections.filter(item =>
-    item.Status !== "PASS" &&
-    ["CRITICAL", "MAJOR", "MINOR", "OBSERVATION"].includes(item.RiskName?.toUpperCase())
+  const correctiveItems = inspections.filter(
+    (item) =>
+      item.Status !== "PASS" &&
+      ["CRITICAL", "MAJOR", "MINOR", "OBSERVATION"].includes(
+        item.RiskName?.toUpperCase()
+      )
   );
 
   const areaCounts = {};
 
-  correctiveItems.forEach(item => {
+  correctiveItems.forEach((item) => {
     const area = item.AreaName?.trim() || "UNSPECIFIED";
     const risk = item.RiskName?.toUpperCase();
 
@@ -116,10 +120,10 @@ async function generateCorrectiveActionChart(inspections) {
   });
 
   const labels = Object.keys(areaCounts);
-  const dataObservation = labels.map(a => areaCounts[a].OBSERVATION);
-  const dataMinor = labels.map(a => areaCounts[a].MINOR);
-  const dataMajor = labels.map(a => areaCounts[a].MAJOR);
-  const dataCritical = labels.map(a => areaCounts[a].CRITICAL);
+  const dataObservation = labels.map((a) => areaCounts[a].OBSERVATION);
+  const dataMinor = labels.map((a) => areaCounts[a].MINOR);
+  const dataMajor = labels.map((a) => areaCounts[a].MAJOR);
+  const dataCritical = labels.map((a) => areaCounts[a].CRITICAL);
 
   const width = 1800;
   const height = 700;
@@ -128,7 +132,11 @@ async function generateCorrectiveActionChart(inspections) {
     ChartJS.defaults.font.size = 16;
   };
 
-  const chartJSNodeCanvas = new ChartJSNodeCanvas({ width, height, chartCallback });
+  const chartJSNodeCanvas = new ChartJSNodeCanvas({
+    width,
+    height,
+    chartCallback,
+  });
 
   const config = {
     type: "bar",
@@ -138,24 +146,24 @@ async function generateCorrectiveActionChart(inspections) {
         {
           label: "Observation",
           data: dataObservation,
-          backgroundColor: "green"
+          backgroundColor: "green",
         },
         {
           label: "Minor",
           data: dataMinor,
-          backgroundColor: "blue"
+          backgroundColor: "blue",
         },
         {
           label: "Major",
           data: dataMajor,
-          backgroundColor: "orange"
+          backgroundColor: "orange",
         },
         {
           label: "Critical",
           data: dataCritical,
-          backgroundColor: "red"
-        }
-      ]
+          backgroundColor: "red",
+        },
+      ],
     },
     options: {
       responsive: false,
@@ -165,26 +173,33 @@ async function generateCorrectiveActionChart(inspections) {
           display: true,
           text: "Area Based Corrective Action Register Overall Summary",
           color: "#000",
-          font: { size: 26, weight: "bold" }
+          font: { size: 26, weight: "bold" },
         },
         datalabels: {
           display: true,
           color: "white",
-          font: { weight: "bold", size: 18 }
-        }
+          font: { weight: "bold", size: 18 },
+        },
       },
       scales: {
         x: {
           stacked: true,
-          ticks: { maxRotation: 50, minRotation: 50 }
+          ticks: { maxRotation: 50, minRotation: 50 },
         },
         y: {
           stacked: true,
           beginAtZero: true,
-          max: Math.max(...dataObservation, ...dataMinor, ...dataMajor, ...dataCritical, 1) + 1
-        }
-      }
-    }
+          max:
+            Math.max(
+              ...dataObservation,
+              ...dataMinor,
+              ...dataMajor,
+              ...dataCritical,
+              1
+            ) + 1,
+        },
+      },
+    },
   };
 
   const buffer = await chartJSNodeCanvas.renderToBuffer(config);
@@ -206,12 +221,17 @@ async function generateLocationSummaryChart(inspections) {
   // Build location stats
   const locationStats = {};
 
-  inspections.forEach(item => {
+  inspections.forEach((item) => {
     const location = item.LocationName?.trim() || "UNSPECIFIED";
     const risk = (item.RiskName || "UNSPECIFIED").toUpperCase();
 
     if (!locationStats[location]) {
-      locationStats[location] = { OBSERVATION: 0, MINOR: 0, MAJOR: 0, CRITICAL: 0 };
+      locationStats[location] = {
+        OBSERVATION: 0,
+        MINOR: 0,
+        MAJOR: 0,
+        CRITICAL: 0,
+      };
     }
 
     if (["CRITICAL", "MAJOR", "MINOR", "OBSERVATION"].includes(risk)) {
@@ -220,21 +240,25 @@ async function generateLocationSummaryChart(inspections) {
   });
 
   const labels = Object.keys(locationStats);
-  const dataObservation = labels.map(l => locationStats[l].OBSERVATION);
-  const dataMinor       = labels.map(l => locationStats[l].MINOR);
-  const dataMajor       = labels.map(l => locationStats[l].MAJOR);
-  const dataCritical    = labels.map(l => locationStats[l].CRITICAL);
+  const dataObservation = labels.map((l) => locationStats[l].OBSERVATION);
+  const dataMinor = labels.map((l) => locationStats[l].MINOR);
+  const dataMajor = labels.map((l) => locationStats[l].MAJOR);
+  const dataCritical = labels.map((l) => locationStats[l].CRITICAL);
 
   const config = {
     type: "bar",
     data: {
       labels,
       datasets: [
-        { label: "Observation", data: dataObservation, backgroundColor: "#00A651" },
-        { label: "Minor",       data: dataMinor,       backgroundColor: "#1E64C8" },
-        { label: "Major",       data: dataMajor,       backgroundColor: "#F4A259" },
-        { label: "Critical",    data: dataCritical,    backgroundColor: "#E10600" }
-      ]
+        {
+          label: "Observation",
+          data: dataObservation,
+          backgroundColor: "#00A651",
+        },
+        { label: "Minor", data: dataMinor, backgroundColor: "#1E64C8" },
+        { label: "Major", data: dataMajor, backgroundColor: "#F4A259" },
+        { label: "Critical", data: dataCritical, backgroundColor: "#E10600" },
+      ],
     },
     options: {
       responsive: false,
@@ -244,21 +268,28 @@ async function generateLocationSummaryChart(inspections) {
           display: true,
           text: "Location Based Dropped Object Overall Summary",
           color: "#000",
-          font: { size: 26, weight: "bold" }
-        }
+          font: { size: 26, weight: "bold" },
+        },
       },
       scales: {
         x: {
           stacked: true,
-          ticks: { maxRotation: 55, minRotation: 55 }
+          ticks: { maxRotation: 55, minRotation: 55 },
         },
         y: {
           stacked: true,
           beginAtZero: true,
-          max: Math.max(...dataObservation, ...dataMinor, ...dataMajor, ...dataCritical, 1) + 1
-        }
-      }
-    }
+          max:
+            Math.max(
+              ...dataObservation,
+              ...dataMinor,
+              ...dataMajor,
+              ...dataCritical,
+              1
+            ) + 1,
+        },
+      },
+    },
   };
 
   const buffer = await chartJSNodeCanvas.renderToBuffer(config);
@@ -267,14 +298,17 @@ async function generateLocationSummaryChart(inspections) {
 
 async function generateLocationCorrectiveActionChart(inspections) {
   // Filter only corrective actions (exclude PASS)
-  const correctiveList = inspections.filter(item =>
-    item.Status?.toUpperCase() !== "PASS" &&
-    ["CRITICAL", "MAJOR", "MINOR", "OBSERVATION"].includes(item.RiskName?.toUpperCase())
+  const correctiveList = inspections.filter(
+    (item) =>
+      item.Status?.toUpperCase() !== "PASS" &&
+      ["CRITICAL", "MAJOR", "MINOR", "OBSERVATION"].includes(
+        item.RiskName?.toUpperCase()
+      )
   );
 
   const locationCounts = {};
 
-  correctiveList.forEach(item => {
+  correctiveList.forEach((item) => {
     const loc = item.LocationName?.trim() || "UNSPECIFIED";
     const risk = item.RiskName?.toUpperCase();
 
@@ -286,18 +320,20 @@ async function generateLocationCorrectiveActionChart(inspections) {
   });
 
   const labels = Object.keys(locationCounts);
-  const dataObs     = labels.map(l => locationCounts[l].OBSERVATION);
-  const dataMinor   = labels.map(l => locationCounts[l].MINOR);
-  const dataMajor   = labels.map(l => locationCounts[l].MAJOR);
-  const dataCritical= labels.map(l => locationCounts[l].CRITICAL);
+  const dataObs = labels.map((l) => locationCounts[l].OBSERVATION);
+  const dataMinor = labels.map((l) => locationCounts[l].MINOR);
+  const dataMajor = labels.map((l) => locationCounts[l].MAJOR);
+  const dataCritical = labels.map((l) => locationCounts[l].CRITICAL);
 
-  const width = 1800, height = 700;
+  const width = 1800,
+    height = 700;
   const chartJSNodeCanvas = new ChartJSNodeCanvas({
-    width, height,
+    width,
+    height,
     chartCallback: (ChartJS) => {
       ChartJS.defaults.font.family = "Calibri";
       ChartJS.defaults.font.size = 16;
-    }
+    },
   });
 
   const config = {
@@ -306,10 +342,10 @@ async function generateLocationCorrectiveActionChart(inspections) {
       labels,
       datasets: [
         { label: "Observation", backgroundColor: "#00A651", data: dataObs },
-        { label: "Minor",       backgroundColor: "#1E64C8", data: dataMinor },
-        { label: "Major",       backgroundColor: "#F4A259", data: dataMajor },
-        { label: "Critical",    backgroundColor: "#E10600", data: dataCritical }
-      ]
+        { label: "Minor", backgroundColor: "#1E64C8", data: dataMinor },
+        { label: "Major", backgroundColor: "#F4A259", data: dataMajor },
+        { label: "Critical", backgroundColor: "#E10600", data: dataCritical },
+      ],
     },
     options: {
       responsive: false,
@@ -319,21 +355,28 @@ async function generateLocationCorrectiveActionChart(inspections) {
           display: true,
           text: "Location Based Corrective Action Register Overall Summary",
           font: { size: 24, weight: "bold" },
-          color: "#000"
-        }
+          color: "#000",
+        },
       },
       scales: {
         x: {
           stacked: true,
-          ticks: { minRotation: 50, maxRotation: 50 }
+          ticks: { minRotation: 50, maxRotation: 50 },
         },
         y: {
           stacked: true,
           beginAtZero: true,
-          max: Math.max(...dataObs, ...dataMinor, ...dataMajor, ...dataCritical, 1) + 1
-        }
-      }
-    }
+          max:
+            Math.max(
+              ...dataObs,
+              ...dataMinor,
+              ...dataMajor,
+              ...dataCritical,
+              1
+            ) + 1,
+        },
+      },
+    },
   };
 
   const buffer = await chartJSNodeCanvas.renderToBuffer(config);
@@ -347,18 +390,24 @@ async function generateLocationCorrectiveActionChart(inspections) {
 // Add this function to generate inspection tables by area with multiple inspections per page
 // Add this function to generate inspection tables by area with multiple inspections per page
 // Add this function to generate inspection tables by area with multiple inspections per page
-function generateInspectionTablesByArea(inspections, hostBase, projectName, inspectorName, inspectionMonthYear) {
-  let html = '';
+function generateInspectionTablesByArea(
+  inspections,
+  hostBase,
+  projectName,
+  inspectorName,
+  inspectionMonthYear
+) {
+  let html = "";
   let pageNumber = 14;
 
   const inspectionsByArea = {};
-  inspections.forEach(inspection => {
-    const area = inspection.AreaName || 'UNSPECIFIED';
+  inspections.forEach((inspection) => {
+    const area = inspection.AreaName || "UNSPECIFIED";
     if (!inspectionsByArea[area]) inspectionsByArea[area] = [];
     inspectionsByArea[area].push(inspection);
   });
 
-  Object.keys(inspectionsByArea).forEach(areaName => {
+  Object.keys(inspectionsByArea).forEach((areaName) => {
     const areaInspections = inspectionsByArea[areaName];
 
     html += `
@@ -407,31 +456,41 @@ function generateInspectionTablesByArea(inspections, hostBase, projectName, insp
   <div class="page-content" style="margin-top:8px;">`;
 
       batch.forEach((inspection, index) => {
-        const risk = (inspection.RiskName || '').toUpperCase();
-        const riskColor = risk === 'CRITICAL' ? '#E10600'
-                        : risk === 'MAJOR' ? '#F4A259'
-                        : risk === 'MINOR' ? '#1E64C8'
-                        : risk === 'OBSERVATION' ? '#00A651'
-                        : '#5B9BD5';
+        const risk = (inspection.RiskName || "").toUpperCase();
+        const riskColor =
+          risk === "CRITICAL"
+            ? "#E10600"
+            : risk === "MAJOR"
+            ? "#F4A259"
+            : risk === "MINOR"
+            ? "#1E64C8"
+            : risk === "OBSERVATION"
+            ? "#00A651"
+            : "#5B9BD5";
 
-        const statusColor = inspection.Status === 'PASS' ? 'green' : '#C00000';
+        const statusColor = inspection.Status === "PASS" ? "green" : "#C00000";
 
         const photos = inspection.photos && inspection.photos.length > 0;
-        const photoUrl = photos ? `${hostBase}/images/${inspection.photos[0]}` : null;
+        const photoUrl = photos
+          ? `${hostBase}/api/images/${inspection.photos[0]}`
+          : null;
 
-        // Dynamically remove image column if no photo
+        // Dynamically adjust colspans based on photo presence
         const imageColumn = photos
           ? `<td rowspan="3" style="border:1px solid #000; width:130px; padding:0;">
                <img src="${photoUrl}" style="width:100%; height:160px; object-fit:cover;" />
              </td>`
-          : '';
+          : "";
 
         const colspanPrimary = photos ? 2 : 3;
         const colspanSec = photos ? 2 : 3;
-        const colspanComments = photos ? 7 : 8;
+        const colspanComments = photos ? 4 : 5;
+        const colspanObservation = photos ? 3 : 4;
 
         html += `
-<table style="width:100%; border-collapse:collapse; font-size:8.5pt; border:1.5px solid #000; margin-bottom:${index < batch.length - 1 ? '15px' : '0'};">
+<table style="width:100%; border-collapse:collapse; font-size:8.5pt; border:1.5px solid #000; margin-bottom:${
+          index < batch.length - 1 ? "15px" : "0"
+        };">
   <tr>
     <td style="border:1px solid #000; font-weight:bold;">Equipment No</td>
     <td style="border:1px solid #000; font-weight:bold;">Area Name</td>
@@ -448,43 +507,45 @@ function generateInspectionTablesByArea(inspections, hostBase, projectName, insp
   </tr>
 
   <tr>
-    <td style="border:1px solid #000;">${inspection.EquipNumber || ''}</td>
-    <td style="border:1px solid #000;">${inspection.AreaName || ''}</td>
-    <td style="border:1px solid #000;">${inspection.LocationName || ''}</td>
-    <td style="border:1px solid #000;">${inspection.EquipmentName || ''}</td>
-    <td style="border:1px solid #000;">${inspection.Control || ''}</td>
+    <td style="border:1px solid #000;">${inspection.EquipNumber || ""}</td>
+    <td style="border:1px solid #000;">${inspection.AreaName || ""}</td>
+    <td style="border:1px solid #000;">${inspection.LocationName || ""}</td>
+    <td style="border:1px solid #000;">${inspection.EquipmentName || ""}</td>
+    <td style="border:1px solid #000;">${inspection.Control || ""}</td>
     <td style="border:1px solid #000; background:${riskColor}; font-weight:bold; color:white;">
-      ${inspection.RiskName || ''}
+      ${inspection.RiskName || ""}
     </td>
-    <td style="border:1px solid #000;">${inspection.EnvironFactor || ''}</td>
-    <td style="border:1px solid #000;">${inspection.Consequence || ''}</td>
-    <td style="border:1px solid #000;">${inspection.SerialNo || ''}</td>
-    <td style="border:1px solid #000; color:${statusColor}; font-weight:bold;">${inspection.Status || ''}</td>
-    <td style="border:1px solid #000;">${inspection.CARepairedStatus || ''}</td>
-    <td style="border:1px solid #000;">${inspection.InspectorName || ''}</td>
+    <td style="border:1px solid #000;">${inspection.EnvironFactor || ""}</td>
+    <td style="border:1px solid #000;">${inspection.Consequence || ""}</td>
+    <td style="border:1px solid #000;">${inspection.SerialNo || ""}</td>
+    <td style="border:1px solid #000; color:${statusColor}; font-weight:bold;">${
+          inspection.Status || ""
+        }</td>
+    <td style="border:1px solid #000;">${inspection.CARepairedStatus || ""}</td>
+    <td style="border:1px solid #000;">${inspection.InspectorName || ""}</td>
   </tr>
 
   <tr>
     ${imageColumn}
-    <td colspan="${colspanPrimary}" style="border:1px solid #000; font-weight:bold;">Primary</td>
-    <td colspan="${colspanSec}" style="border:1px solid #000; font-weight:bold;">Secondary</td>
+    <td colspan="${colspanPrimary}" style="border:1px solid #000; font-weight:bold;">Primary Comments</td>
+    <td colspan="${colspanSec}" style="border:1px solid #000; font-weight:bold;">Secondary Comments</td>
     <td colspan="${colspanComments}" style="border:1px solid #000; font-weight:bold;">Comments</td>
+    <td colspan="${colspanObservation}" style="border:1px solid #000; font-weight:bold;">Observation</td>
   </tr>
 
   <tr style="height:100px; vertical-align:top;">
-    <td colspan="${colspanPrimary}" style="border:1px solid #000; text-align:left; padding:3px;">${inspection.PrimaryComments || ''}</td>
-    <td colspan="${colspanSec}" style="border:1px solid #000; text-align:left; padding:3px;">${inspection.SecondaryComments || ''}</td>
-    <td colspan="${colspanComments}" style="border:1px solid #000; text-align:left; padding:3px;">${inspection.Comments || ''}</td>
-  </tr>
-
-  <tr>
-    <td colspan="${photos ? 11 : 12}" style="border:1px solid #000; font-weight:bold; text-align:center;">
-      Observation
-    </td>
-  </tr>
-
-  <tr style="height:60px; vertical-align:top;">
-    <td colspan="${photos ? 11 : 12}" style="border:1px solid #000; text-align:left; padding:3px;">${inspection.Observation || ''}</td>
+    <td colspan="${colspanPrimary}" style="border:1px solid #000; text-align:left; padding:3px;">${
+          inspection.PrimaryComments || ""
+        }</td>
+    <td colspan="${colspanSec}" style="border:1px solid #000; text-align:left; padding:3px;">${
+          inspection.SecondaryComments || ""
+        }</td>
+    <td colspan="${colspanComments}" style="border:1px solid #000; text-align:left; padding:3px;">${
+          inspection.Comments || ""
+        }</td>
+    <td colspan="${colspanObservation}" style="border:1px solid #000; text-align:left; padding:3px;">${
+          inspection.Observation || ""
+        }</td>
   </tr>
 </table>`;
       });
@@ -511,14 +572,16 @@ function generateInspectionTablesByArea(inspections, hostBase, projectName, insp
 
   return html;
 }
-
 // ---------------------------------------------------------
 // 🟦 PDF GENERATION — INCLUDING PAGE 10
 // ---------------------------------------------------------
 router.post("/reports/pdf", async (req, res) => {
   try {
-    const inspections = Array.isArray(req.body.inspections) ? req.body.inspections : [];
-    const hostBase = req.body.hostBase || `http://localhost:${process.env.PORT || 5000}`;
+    const inspections = Array.isArray(req.body.inspections)
+      ? req.body.inspections
+      : [];
+    const hostBase =
+      req.body.hostBase || `http://localhost:${process.env.PORT || 5000}`;
 
     if (inspections.length === 0) {
       return res.status(400).json({ error: "No inspections provided" });
@@ -527,33 +590,44 @@ router.post("/reports/pdf", async (req, res) => {
     // Extract common dynamic fields
     const first = inspections[0];
     const formattedDate = new Date(first.DateInspected || Date.now())
-      .toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+      .toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
       .replace(/ /g, "-");
 
     const inspectionMonthYear = first?.DateInspected
-      ? new Date(first.DateInspected).toLocaleDateString("en-GB", { month: "long", year: "numeric" })
+      ? new Date(first.DateInspected).toLocaleDateString("en-GB", {
+          month: "long",
+          year: "numeric",
+        })
       : "July 2015";
 
     const clientName = escapeText(first?.ClientName || "HAZTECH SOLUTIONS");
-    const projectName = escapeText(first?.ProjectName || "E12C PROJECT SERIA BRUNEI DARUSSALAM");
+    const projectName = escapeText(
+      first?.ProjectName || "E12C PROJECT SERIA BRUNEI DARUSSALAM"
+    );
     const inspectorName = escapeText(first?.InspectorName || "Steve Watt");
 
-    // 🔵 Generate Chart Image  
+    // 🔵 Generate Chart Image
     // 🔵 Generate Charts
-const chartImage = await generateAreaSummaryChart(inspections);
-const correctiveActionChartBase64 = await generateCorrectiveActionChart(inspections);
-const locationChartBase64 = await generateLocationSummaryChart(inspections);
-const locationCorrectiveChartBase64 = await generateLocationCorrectiveActionChart(inspections);
+    const chartImage = await generateAreaSummaryChart(inspections);
+    const correctiveActionChartBase64 = await generateCorrectiveActionChart(
+      inspections
+    );
+    const locationChartBase64 = await generateLocationSummaryChart(inspections);
+    const locationCorrectiveChartBase64 =
+      await generateLocationCorrectiveActionChart(inspections);
 
-// Generate dynamic inspection pages with multiple rows per page
-const inspectionPagesHtml = generateInspectionTablesByArea(
-  inspections, 
-  hostBase, 
-  projectName, 
-  inspectorName, 
-  inspectionMonthYear
-);
-
+    // Generate dynamic inspection pages with multiple rows per page
+    const inspectionPagesHtml = generateInspectionTablesByArea(
+      inspections,
+      hostBase,
+      projectName,
+      inspectorName,
+      inspectionMonthYear
+    );
 
     const html = `
 <!DOCTYPE html>
@@ -1329,155 +1403,20 @@ const inspectionPagesHtml = generateInspectionTablesByArea(
   </table>
 
 </div>
-<div class="page-break"></div>
 
-<!-- PAGE 5 — DEFINITIONS -->
-<div class="page content-page">
 
-  <!-- HEADER -->
-  <div class="header-row">
-    <img src="${hostBase}/ocslogo.png" class="header-logo" />
-    <img src="${hostBase}/abclogo.png" class="header-logo" />
-  </div>
-
-  <!-- CONTENT WITH WATERMARK -->
-  <div class="page-content" style="position:relative; display:flex; justify-content:center; align-items:center;">
-
-      <!-- WATERMARK -->
-      <img 
-        src="${hostBase}/ocslogo.png"
-        style="
-          position:absolute;
-          width:60%;
-          height:auto;
-          opacity:0.13;
-          filter:blur(0.5px);
-          user-select:none;
-        "
-      />
-
-      <!-- CENTER TITLE -->
-      <div style="font-size:16pt; font-weight:bold; z-index:10; letter-spacing:0.5px;">
-        CROWN SECTION
-      </div>
-  </div>
-
-  <!-- FOOTER -->
-  <table class="footer-table">
-    <tr>
-      <td><b>Asset</b></td><td>${projectName}</td>
-      <td><b>Inspected By</b></td><td>${inspectorName}</td>
-      <td colspan="2">www.ocsgroup.com | info@ocsgroup.com</td>
-    </tr>
-    <tr>
-      <td><b>Inspection Date</b></td><td>${inspectionMonthYear}</td>
-      <td><b>QA Review</b></td><td>Anna</td>
-      <td><b>Page</b></td><td>14</td>
-    </tr>
-  </table>
-
-</div>
-<div class="page-break"></div>
-<!-- PAGE — SAMPLE EQUIPMENT REGISTER ROW -->
-<div class="page content-page">
-
-  <!-- HEADER -->
-  <div class="header-row" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-    <img src="${hostBase}/ocslogo.png" class="header-logo" style="height:35px; width:auto;" />
-    <img src="${hostBase}/abclogo.png" class="header-logo" style="height:35px; width:auto;" />
-  </div>
-
-  <!-- CONTENT -->
-  <div class="page-content" style="margin-top:10px;">
-
-    <table style="width:100%; border-collapse:collapse; font-family:Calibri; font-size:8.5pt; text-align:center; border:1.5px solid #000;">
-      
-      <!-- HEADER ROW -->
-      <tr style="height:28px;">
-        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Equipment No</td>
-        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Area Name</td>
-        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Location Name</td>
-        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Equipment</td>
-        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Control</td>
-        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Risk</td>
-        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Environmental<br>Factor</td>
-        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Consequence</td>
-        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Serial No</td>
-        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Status</td>
-        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Repaired Status</td>
-        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Inspector</td>
-      </tr>
-
-      <!-- DATA ROW -->
-      <tr style="height:30px;">
-        <td style="border:1px solid #000; padding:3px;">OCS-0005</td>
-        <td style="border:1px solid #000; padding:3px;">CROWN SECTION</td>
-        <td style="border:1px solid #000; padding:3px;">GIN POLE /CROWN</td>
-        <td style="border:1px solid #000; padding:3px;">IN REEL</td>
-        <td style="border:1px solid #000; padding:3px;">Weekly</td>
-        <td style="border:1px solid #000; padding:3px; background:#5B9BD5; font-weight:bold; color:#fff;">MINOR</td>
-        <td style="border:1px solid #000; padding:3px;">Visibility</td>
-        <td style="border:1px solid #000; padding:3px;">Severe</td>
-        <td style="border:1px solid #000; padding:3px;">111</td>
-        <td style="border:1px solid #000; padding:3px; color:#C00000; font-weight:bold;">FAIL</td>
-        <td style="border:1px solid #000; padding:3px;">OPEN</td>
-        <td style="border:1px solid #000; padding:3px;">Steve Watt</td>
-      </tr>
-
-      <!-- IMAGE + COMMENT HEADER ROW -->
-      <tr style="height:22px;">
-        <td rowspan="3" style="border:1px solid #000; width:130px; padding:0; vertical-align:top;">
-          <img src="${hostBase}/rig-photos.png" style="width:100%; height:180px; object-fit:cover; display:block;" />
-        </td>
-        <td colspan="2" style="border:1px solid #000; font-weight:bold; padding:3px; background:#fff;">Primary Comments</td>
-        <td colspan="2" style="border:1px solid #000; font-weight:bold; padding:3px; background:#fff;">Secondary Comments</td>
-        <td colspan="7" style="border:1px solid #000; font-weight:bold; padding:3px; background:#fff;">Comments</td>
-      </tr>
-
-      <!-- COMMENT CONTENT ROW -->
-      <tr style="height:120px; vertical-align:top;">
-        <td colspan="2" style="border:1px solid #000; padding:4px; text-align:left; font-size:8pt;"></td>
-        <td colspan="2" style="border:1px solid #000; padding:4px; text-align:left; font-size:8pt;"></td>
-        <td colspan="7" style="border:1px solid #000; padding:6px; text-align:left; font-size:8pt; line-height:1.3;">
-          Are bolts secured with an approved locking method<br>i.e. double nut or lock wire
-        </td>
-      </tr>
-
-      <!-- OBSERVATION HEADER ROW -->
-      <tr style="height:22px;">
-        <td colspan="11" style="border:1px solid #000; font-weight:bold; text-align:center; padding:3px; background:#fff;">Observation</td>
-      </tr>
-
-    </table>
-  </div>
-
-  <!-- FOOTER -->
-  <table class="footer-table" style="width:100%; margin-top:8px; font-family:Calibri; font-size:8pt; border-collapse:collapse;">
-    <tr>
-      <td style="padding:2px 4px; font-weight:bold; width:12%;">Asset</td>
-      <td style="padding:2px 4px; width:20%;">${projectName}</td>
-      <td style="padding:2px 4px; font-weight:bold; width:12%;">Inspected By</td>
-      <td style="padding:2px 4px; width:20%;">${inspectorName}</td>
-      <td colspan="2" style="padding:2px 4px; text-align:right; color:#0078c9; font-weight:600;">www.ocsgroup.com | info@ocsgroup.com</td>
-    </tr>
-    <tr>
-      <td style="padding:2px 4px; font-weight:bold;">Inspection Date</td>
-      <td style="padding:2px 4px;">${inspectionMonthYear}</td>
-      <td style="padding:2px 4px; font-weight:bold;">QA Review</td>
-      <td style="padding:2px 4px;">Anna</td>
-      <td style="padding:2px 4px; font-weight:bold; text-align:right; width:8%;">Page</td>
-      <td style="padding:2px 4px; width:8%;">XX</td>
-    </tr>
-  </table>
-
-</div>
 
 ${inspectionPagesHtml}
 </body>
 </html>`;
 
     // Generate PDF
-    const browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] });
+    const browser = await puppeteer.launch({
+      args: chromium.args,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
+      defaultViewport: chromium.defaultViewport,
+    });
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0" });
     await page.emulateMediaType("print");
@@ -1485,17 +1424,21 @@ ${inspectionPagesHtml}
     const pdf = await page.pdf({
       format: "A4",
       printBackground: true,
-      margin: { top: "15mm", bottom: "15mm", left: "12mm", right: "12mm" }
+      margin: { top: "15mm", bottom: "15mm", left: "12mm", right: "12mm" },
     });
 
     await browser.close();
 
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename=DROPS_Report_${Date.now()}.pdf`);
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=DROPS_Report_${Date.now()}.pdf`
+    );
     res.send(pdf);
-
   } catch (err) {
-    res.status(500).json({ error: "PDF generation failed", details: err.message });
+    res
+      .status(500)
+      .json({ error: "PDF generation failed", details: err.message });
   }
 });
 
