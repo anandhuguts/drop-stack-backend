@@ -1,13 +1,11 @@
-// routes/reports.js
 import express from "express";
-import chromium from "@sparticuz/chromium";
-import puppeteer from "puppeteer-core";
-import { ChartJSNodeCanvas } from "chartjs-node-canvas";
+import puppeteer from "puppeteer";
+import { ChartJSNodeCanvas } from "chartjs-node-canvas"; // chart rendering
 
 const router = express.Router();
 
-// Helper: escape HTML
-function escapeHtml(str = "") {
+// Escape HTML helper — keep same
+function escapeText(str = "") {
   return String(str)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -16,1390 +14,1475 @@ function escapeHtml(str = "") {
     .replace(/'/g, "&#039;");
 }
 
-// Group inspections by area
-function groupInspectionsByArea(inspections) {
-  const grouped = {};
-  
-  inspections.forEach(inspection => {
-    const area = inspection.AreaName || "Uncategorized";
-    if (!grouped[area]) {
-      grouped[area] = [];
+// ---------------------------------------------------------
+// 🟦 GRAPH GENERATOR FUNCTION (returns image as BASE64 PNG)
+// ---------------------------------------------------------
+async function generateAreaSummaryChart(inspections) {
+  const width = 1400; // big chart for clarity
+  const height = 550;
+
+  const chartJSNodeCanvas = new ChartJSNodeCanvas({ width, height });
+
+  // Group by AreaName + count RiskName types
+  const areaStats = {};
+
+  inspections.forEach(item => {
+    const area = item.AreaName || "UNSPECIFIED";
+    const risk = (item.RiskName || "UNSPECIFIED").toUpperCase();
+
+    if (!areaStats[area]) {
+      areaStats[area] = { CRITICAL: 0, MAJOR: 0, MINOR: 0, OBSERVATION: 0 };
     }
-    grouped[area].push(inspection);
-  });
-  
-  return grouped;
-}
-
-// Build area sections HTML
-function buildAreaSectionsHtml(groupedInspections, hostBase) {
-  return Object.entries(groupedInspections)
-    .map(([areaName, areaInspections]) => {
-      const areaStats = buildSummaryStats(areaInspections);
-      
-      return `
-      <div class="area-section">
-        <!-- Area Header -->
-        <div class="area-header">
-          <h3 class="area-title">${escapeHtml(areaName)}</h3>
-          <div class="area-stats">
-            <span class="area-stat">Total: ${areaStats.total}</span>
-            <span class="area-stat pass">Pass: ${areaStats.pass}</span>
-            <span class="area-stat fail">Fail: ${areaStats.fail}</span>
-            <span class="area-stat">Critical: ${areaStats.critical}</span>
-            <span class="area-stat">Major: ${areaStats.major}</span>
-            <span class="area-stat">Minor: ${areaStats.minor}</span>
-          </div>
-        </div>
-        
-        <!-- Area Inspection Boxes -->
-        ${buildInspectionBoxesHtml(areaInspections, hostBase)}
-      </div>
-      `;
-    })
-    .join("\n");
-}
-
-// Build individual inspection boxes HTML
-function buildInspectionBoxesHtml(inspections, hostBase) {
-  return inspections
-    .map((i, idx) => {
-      const date = i.DateInspected || i.createdAt
-        ? new Date(i.DateInspected || i.createdAt).toLocaleDateString('en-GB')
-        : "—";
-      const status = (i.Status || "PENDING").toUpperCase();
-      const risk = escapeHtml(i.RiskName || "—");
-      
-      // Build photos for this inspection
-      let photosHtml = '';
-      if (Array.isArray(i.photos) && i.photos.length > 0) {
-        const photoTags = i.photos.map(pid => {
-          const url = `${hostBase.replace(/\/$/, "")}/api/images/${pid}`;
-          return `<img class="inspection-photo" src="${url}" alt="Photo" />`;
-        }).join('');
-        photosHtml = `<div class="photos-section">${photoTags}</div>`;
-      }
-      
-      return `
-      <div class="inspection-box">
-        <!-- Header Row -->
-        <div class="inspection-header">
-          <div class="header-cell"><strong>Equipment No</strong><br/>${escapeHtml(i.EquipNumber || "—")}</div>
-          <div class="header-cell"><strong>Location Name</strong><br/>${escapeHtml(i.LocationName || "—")}</div>
-          <div class="header-cell"><strong>Equipment</strong><br/>${escapeHtml(i.EquipmentName || "—")}</div>
-          <div class="header-cell"><strong>Control</strong><br/>${escapeHtml(i.Control || "—")}</div>
-          <div class="header-cell"><strong>Risk</strong><br/><span class="badge risk-${risk.toLowerCase().replace(/\s/g, '-')}">${risk}</span></div>
-          <div class="header-cell"><strong>Environmental<br/>Factor</strong><br/>${escapeHtml(i.EnvironFactor || "—")}</div>
-          <div class="header-cell"><strong>Consequence</strong><br/>${escapeHtml(i.Consequence || "—")}</div>
-          <div class="header-cell"><strong>Serial No</strong><br/>${escapeHtml(i.SerialNo || "—")}</div>
-          <div class="header-cell"><strong>Status</strong><br/><span class="badge status-${status.toLowerCase()}">${status}</span></div>
-          <div class="header-cell"><strong>Repaired<br/>Status</strong><br/>${escapeHtml(i.CARepairedStatus || "OPEN")}</div>
-          <div class="header-cell"><strong>Inspector</strong><br/>${escapeHtml(i.InspectorName || "—")}</div>
-          <div class="header-cell"><strong>Date</strong><br/>${date}</div>
-        </div>
-        
-        <!-- Photos Section (if exists) -->
-        ${photosHtml}
-        
-        <!-- Comments Section -->
-        <div class="comments-row">
-          ${i.PrimaryComments ? `
-          <div class="comment-box">
-            <div class="comment-label">Primary Comments</div>
-            <div class="comment-text">${escapeHtml(i.PrimaryComments)}</div>
-          </div>
-          ` : ''}
-          
-          ${i.SecondaryComments ? `
-          <div class="comment-box">
-            <div class="comment-label">Secondary Comments</div>
-            <div class="comment-text">${escapeHtml(i.SecondaryComments)}</div>
-          </div>
-          ` : ''}
-          
-          ${i.Comments || i.Observation ? `
-          <div class="comment-box full-width">
-            <div class="comment-label">Comments</div>
-            <div class="comment-text">${escapeHtml(i.Comments || i.Observation || "")}</div>
-          </div>
-          ` : ''}
-          
-          ${i.LoadPathComments ? `
-          <div class="comment-box full-width">
-            <div class="comment-label">Load Path Comments</div>
-            <div class="comment-text">${escapeHtml(i.LoadPathComments)}</div>
-          </div>
-          ` : ''}
-          
-          ${i.SafetySecComments ? `
-          <div class="comment-box full-width">
-            <div class="comment-label">Safety Secondary Comments</div>
-            <div class="comment-text">${escapeHtml(i.SafetySecComments)}</div>
-          </div>
-          ` : ''}
-          
-          ${i.FasteningMethod ? `
-          <div class="comment-box">
-            <div class="comment-label">Fastening Method</div>
-            <div class="comment-text">${escapeHtml(i.FasteningMethod)}</div>
-          </div>
-          ` : ''}
-          
-          ${i.SecFastMethod ? `
-          <div class="comment-box">
-            <div class="comment-label">Secondary Fastening Method</div>
-            <div class="comment-text">${escapeHtml(i.SecFastMethod)}</div>
-          </div>
-          ` : ''}
-        </div>
-        
-        ${i.Observation ? `
-        <div class="observation-row">
-          <div class="comment-label">Observation</div>
-          <div class="comment-text">${escapeHtml(i.Observation)}</div>
-        </div>
-        ` : ''}
-      </div>
-      `;
-    })
-    .join("\n");
-}
-
-// Build summary statistics
-function buildSummaryStats(inspections) {
-  const total = inspections.length;
-  const pass = inspections.filter(i => i.Status?.toUpperCase() === "PASS").length;
-  const fail = inspections.filter(i => i.Status?.toUpperCase() === "FAIL").length;
-  const pending = inspections.filter(i => i.Status?.toUpperCase() === "PENDING").length;
-  
-  const critical = inspections.filter(i => i.RiskName?.toUpperCase() === "CRITICAL").length;
-  const major = inspections.filter(i => i.RiskName?.toUpperCase() === "MAJOR").length;
-  const minor = inspections.filter(i => i.RiskName?.toUpperCase() === "MINOR").length;
-  
-  return { total, pass, fail, pending, critical, major, minor };
-}
-
-// Generate chart images
-async function generateCharts(groupedInspections) {
-  const width = 800;
-  const height = 500;
-  const chartJSNodeCanvas = new ChartJSNodeCanvas({ width, height, backgroundColour: 'white' });
-
-  // Prepare data for area-wise risk chart
-  const areaNames = Object.keys(groupedInspections);
-  const criticalData = [];
-  const majorData = [];
-  const minorData = [];
-
-  areaNames.forEach(area => {
-    const stats = buildSummaryStats(groupedInspections[area]);
-    criticalData.push(stats.critical);
-    majorData.push(stats.major);
-    minorData.push(stats.minor);
+    if (["CRITICAL", "MAJOR", "MINOR", "OBSERVATION"].includes(risk)) {
+      areaStats[area][risk]++;
+    }
   });
 
-  // Area-wise Risk Chart (Stacked Bar)
-  const riskChartConfig = {
-    type: 'bar',
-    data: {
-      labels: areaNames,
-      datasets: [
-        {
-          label: 'Critical',
-          data: criticalData,
-          backgroundColor: '#dc2626',
-          borderColor: '#dc2626',
-          borderWidth: 1
-        },
-        {
-          label: 'Major',
-          data: majorData,
-          backgroundColor: '#f97316',
-          borderColor: '#f97316',
-          borderWidth: 1
-        },
-        {
-          label: 'Minor',
-          data: minorData,
-          backgroundColor: '#eab308',
-          borderColor: '#eab308',
-          borderWidth: 1
-        }
-      ]
+  const labels = Object.keys(areaStats);
+
+  // datasets follow sample color layout (stacked)
+  const datasets = [
+    {
+      label: "Observation",
+      data: labels.map(area => areaStats[area].OBSERVATION),
+      backgroundColor: "#00A651"
     },
+    {
+      label: "Minor",
+      data: labels.map(area => areaStats[area].MINOR),
+      backgroundColor: "#1E64C8"
+    },
+    {
+      label: "Major",
+      data: labels.map(area => areaStats[area].MAJOR),
+      backgroundColor: "#F4A259"
+    },
+    {
+      label: "Critical",
+      data: labels.map(area => areaStats[area].CRITICAL),
+      backgroundColor: "#E10600"
+    }
+  ];
+
+  const configuration = {
+    type: "bar",
+    data: { labels, datasets },
     options: {
-      indexAxis: 'y',
-      responsive: true,
+      responsive: false,
+      maintainAspectRatio: false,
       plugins: {
+        legend: { position: "right" },
         title: {
           display: true,
-          text: 'Risk Classification by Area',
-          font: { size: 18, weight: 'bold' }
-        },
-        legend: {
-          position: 'top',
-          labels: { font: { size: 14 } }
+          text: "Area Based Dropped Object Overall Summary",
+          font: { size: 20, weight: "bold" }
         }
       },
       scales: {
         x: {
           stacked: true,
-          title: { display: true, text: 'Count', font: { size: 14 } }
+          ticks: { maxRotation: 75, minRotation: 45 }
         },
         y: {
           stacked: true,
-          ticks: { font: { size: 12 } }
+          beginAtZero: true,
+          ticks: { stepSize: 1 }
         }
       }
     }
   };
 
-  const riskChartBuffer = await chartJSNodeCanvas.renderToBuffer(riskChartConfig);
-  const riskChartBase64 = riskChartBuffer.toString('base64');
-
-  // Overall Status Pie Chart
-  const allInspections = Object.values(groupedInspections).flat();
-  const overallStats = buildSummaryStats(allInspections);
-
-  const statusChartConfig = {
-    type: 'pie',
-    data: {
-      labels: ['Pass', 'Fail', 'Pending'],
-      datasets: [{
-        data: [overallStats.pass, overallStats.fail, overallStats.pending],
-        backgroundColor: ['#22c55e', '#ef4444', '#f59e0b'],
-        borderColor: ['#16a34a', '#dc2626', '#d97706'],
-        borderWidth: 2
-      }]
-    },
-    options: {
-      responsive: true,
-      plugins: {
-        title: {
-          display: true,
-          text: 'Overall Status Distribution',
-          font: { size: 18, weight: 'bold' }
-        },
-        legend: {
-          position: 'bottom',
-          labels: { font: { size: 14 } }
-        }
-      }
-    }
-  };
-
-  const statusChartBuffer = await chartJSNodeCanvas.renderToBuffer(statusChartConfig);
-  const statusChartBase64 = statusChartBuffer.toString('base64');
-
-  // Risk Distribution Doughnut Chart
-  const riskDistConfig = {
-    type: 'doughnut',
-    data: {
-      labels: ['Critical', 'Major', 'Minor'],
-      datasets: [{
-        data: [overallStats.critical, overallStats.major, overallStats.minor],
-        backgroundColor: ['#dc2626', '#f97316', '#eab308'],
-        borderColor: ['#991b1b', '#c2410c', '#a16207'],
-        borderWidth: 2
-      }]
-    },
-    options: {
-      responsive: true,
-      plugins: {
-        title: {
-          display: true,
-          text: 'Risk Level Distribution',
-          font: { size: 18, weight: 'bold' }
-        },
-        legend: {
-          position: 'bottom',
-          labels: { font: { size: 14 } }
-        }
-      }
-    }
-  };
-
-  const riskDistBuffer = await chartJSNodeCanvas.renderToBuffer(riskDistConfig);
-  const riskDistBase64 = riskDistBuffer.toString('base64');
-
-  return {
-    riskChart: `data:image/png;base64,${riskChartBase64}`,
-    statusChart: `data:image/png;base64,${statusChartBase64}`,
-    riskDistChart: `data:image/png;base64,${riskDistBase64}`
-  };
+  const imgBuffer = await chartJSNodeCanvas.renderToBuffer(configuration);
+  return `data:image/png;base64,${imgBuffer.toString("base64")}`;
 }
 
+async function generateCorrectiveActionChart(inspections) {
+  const correctiveItems = inspections.filter(item =>
+    item.Status !== "PASS" &&
+    ["CRITICAL", "MAJOR", "MINOR", "OBSERVATION"].includes(item.RiskName?.toUpperCase())
+  );
+
+  const areaCounts = {};
+
+  correctiveItems.forEach(item => {
+    const area = item.AreaName?.trim() || "UNSPECIFIED";
+    const risk = item.RiskName?.toUpperCase();
+
+    if (!areaCounts[area]) {
+      areaCounts[area] = { OBSERVATION: 0, MINOR: 0, MAJOR: 0, CRITICAL: 0 };
+    }
+
+    areaCounts[area][risk] += 1;
+  });
+
+  const labels = Object.keys(areaCounts);
+  const dataObservation = labels.map(a => areaCounts[a].OBSERVATION);
+  const dataMinor = labels.map(a => areaCounts[a].MINOR);
+  const dataMajor = labels.map(a => areaCounts[a].MAJOR);
+  const dataCritical = labels.map(a => areaCounts[a].CRITICAL);
+
+  const width = 1800;
+  const height = 700;
+  const chartCallback = (ChartJS) => {
+    ChartJS.defaults.font.family = "Calibri";
+    ChartJS.defaults.font.size = 16;
+  };
+
+  const chartJSNodeCanvas = new ChartJSNodeCanvas({ width, height, chartCallback });
+
+  const config = {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "Observation",
+          data: dataObservation,
+          backgroundColor: "green"
+        },
+        {
+          label: "Minor",
+          data: dataMinor,
+          backgroundColor: "blue"
+        },
+        {
+          label: "Major",
+          data: dataMajor,
+          backgroundColor: "orange"
+        },
+        {
+          label: "Critical",
+          data: dataCritical,
+          backgroundColor: "red"
+        }
+      ]
+    },
+    options: {
+      responsive: false,
+      plugins: {
+        legend: { position: "right" },
+        title: {
+          display: true,
+          text: "Area Based Corrective Action Register Overall Summary",
+          color: "#000",
+          font: { size: 26, weight: "bold" }
+        },
+        datalabels: {
+          display: true,
+          color: "white",
+          font: { weight: "bold", size: 18 }
+        }
+      },
+      scales: {
+        x: {
+          stacked: true,
+          ticks: { maxRotation: 50, minRotation: 50 }
+        },
+        y: {
+          stacked: true,
+          beginAtZero: true,
+          max: Math.max(...dataObservation, ...dataMinor, ...dataMajor, ...dataCritical, 1) + 1
+        }
+      }
+    }
+  };
+
+  const buffer = await chartJSNodeCanvas.renderToBuffer(config);
+  return buffer.toString("base64");
+}
+async function generateLocationSummaryChart(inspections) {
+  const width = 1800;
+  const height = 700;
+
+  const chartJSNodeCanvas = new ChartJSNodeCanvas({
+    width,
+    height,
+    chartCallback: (ChartJS) => {
+      ChartJS.defaults.font.family = "Calibri";
+      ChartJS.defaults.font.size = 14;
+    },
+  });
+
+  // Build location stats
+  const locationStats = {};
+
+  inspections.forEach(item => {
+    const location = item.LocationName?.trim() || "UNSPECIFIED";
+    const risk = (item.RiskName || "UNSPECIFIED").toUpperCase();
+
+    if (!locationStats[location]) {
+      locationStats[location] = { OBSERVATION: 0, MINOR: 0, MAJOR: 0, CRITICAL: 0 };
+    }
+
+    if (["CRITICAL", "MAJOR", "MINOR", "OBSERVATION"].includes(risk)) {
+      locationStats[location][risk]++;
+    }
+  });
+
+  const labels = Object.keys(locationStats);
+  const dataObservation = labels.map(l => locationStats[l].OBSERVATION);
+  const dataMinor       = labels.map(l => locationStats[l].MINOR);
+  const dataMajor       = labels.map(l => locationStats[l].MAJOR);
+  const dataCritical    = labels.map(l => locationStats[l].CRITICAL);
+
+  const config = {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        { label: "Observation", data: dataObservation, backgroundColor: "#00A651" },
+        { label: "Minor",       data: dataMinor,       backgroundColor: "#1E64C8" },
+        { label: "Major",       data: dataMajor,       backgroundColor: "#F4A259" },
+        { label: "Critical",    data: dataCritical,    backgroundColor: "#E10600" }
+      ]
+    },
+    options: {
+      responsive: false,
+      plugins: {
+        legend: { position: "right" },
+        title: {
+          display: true,
+          text: "Location Based Dropped Object Overall Summary",
+          color: "#000",
+          font: { size: 26, weight: "bold" }
+        }
+      },
+      scales: {
+        x: {
+          stacked: true,
+          ticks: { maxRotation: 55, minRotation: 55 }
+        },
+        y: {
+          stacked: true,
+          beginAtZero: true,
+          max: Math.max(...dataObservation, ...dataMinor, ...dataMajor, ...dataCritical, 1) + 1
+        }
+      }
+    }
+  };
+
+  const buffer = await chartJSNodeCanvas.renderToBuffer(config);
+  return buffer.toString("base64");
+}
+
+async function generateLocationCorrectiveActionChart(inspections) {
+  // Filter only corrective actions (exclude PASS)
+  const correctiveList = inspections.filter(item =>
+    item.Status?.toUpperCase() !== "PASS" &&
+    ["CRITICAL", "MAJOR", "MINOR", "OBSERVATION"].includes(item.RiskName?.toUpperCase())
+  );
+
+  const locationCounts = {};
+
+  correctiveList.forEach(item => {
+    const loc = item.LocationName?.trim() || "UNSPECIFIED";
+    const risk = item.RiskName?.toUpperCase();
+
+    if (!locationCounts[loc]) {
+      locationCounts[loc] = { OBSERVATION: 0, MINOR: 0, MAJOR: 0, CRITICAL: 0 };
+    }
+
+    locationCounts[loc][risk] += 1;
+  });
+
+  const labels = Object.keys(locationCounts);
+  const dataObs     = labels.map(l => locationCounts[l].OBSERVATION);
+  const dataMinor   = labels.map(l => locationCounts[l].MINOR);
+  const dataMajor   = labels.map(l => locationCounts[l].MAJOR);
+  const dataCritical= labels.map(l => locationCounts[l].CRITICAL);
+
+  const width = 1800, height = 700;
+  const chartJSNodeCanvas = new ChartJSNodeCanvas({
+    width, height,
+    chartCallback: (ChartJS) => {
+      ChartJS.defaults.font.family = "Calibri";
+      ChartJS.defaults.font.size = 16;
+    }
+  });
+
+  const config = {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        { label: "Observation", backgroundColor: "#00A651", data: dataObs },
+        { label: "Minor",       backgroundColor: "#1E64C8", data: dataMinor },
+        { label: "Major",       backgroundColor: "#F4A259", data: dataMajor },
+        { label: "Critical",    backgroundColor: "#E10600", data: dataCritical }
+      ]
+    },
+    options: {
+      responsive: false,
+      plugins: {
+        legend: { position: "right" },
+        title: {
+          display: true,
+          text: "Location Based Corrective Action Register Overall Summary",
+          font: { size: 24, weight: "bold" },
+          color: "#000"
+        }
+      },
+      scales: {
+        x: {
+          stacked: true,
+          ticks: { minRotation: 50, maxRotation: 50 }
+        },
+        y: {
+          stacked: true,
+          beginAtZero: true,
+          max: Math.max(...dataObs, ...dataMinor, ...dataMajor, ...dataCritical, 1) + 1
+        }
+      }
+    }
+  };
+
+  const buffer = await chartJSNodeCanvas.renderToBuffer(config);
+  return buffer.toString("base64");
+}
+
+// Add this function to generate inspection pages by area
+// Add this function to generate inspection tables by area with multiple rows per page
+// Add this function to generate inspection tables by area with multiple rows per page
+// Add this function to generate inspection tables by area with your exact table style
+// Add this function to generate inspection tables by area with multiple inspections per page
+// Add this function to generate inspection tables by area with multiple inspections per page
+// Add this function to generate inspection tables by area with multiple inspections per page
+function generateInspectionTablesByArea(inspections, hostBase, projectName, inspectorName, inspectionMonthYear) {
+  let html = '';
+  let pageNumber = 14;
+
+  const inspectionsByArea = {};
+  inspections.forEach(inspection => {
+    const area = inspection.AreaName || 'UNSPECIFIED';
+    if (!inspectionsByArea[area]) inspectionsByArea[area] = [];
+    inspectionsByArea[area].push(inspection);
+  });
+
+  Object.keys(inspectionsByArea).forEach(areaName => {
+    const areaInspections = inspectionsByArea[areaName];
+
+    html += `
+<div class="page-break"></div>
+<div class="page content-page">
+  <div class="header-row">
+    <img src="${hostBase}/ocslogo.png" class="header-logo" />
+    <img src="${hostBase}/abclogo.png" class="header-logo" />
+  </div>
+
+  <div class="page-content" style="position:relative; display:flex; justify-content:center; align-items:center;">
+    <img src="${hostBase}/ocslogo.png"
+      style="position:absolute; width:60%; opacity:0.13; filter:blur(0.5px);" />
+    <div style="font-size:16pt; font-weight:bold; z-index:10;">
+      ${areaName.toUpperCase()}
+    </div>
+  </div>
+
+  <table class="footer-table">
+    <tr>
+      <td><b>Asset</b></td><td>${projectName}</td>
+      <td><b>Inspected By</b></td><td>${inspectorName}</td>
+      <td colspan="2">www.ocsgroup.com | info@ocsgroup.com</td>
+    </tr>
+    <tr>
+      <td><b>Inspection Date</b></td><td>${inspectionMonthYear}</td>
+      <td><b>QA Review</b></td><td>Anna</td>
+      <td><b>Page</b></td><td>${pageNumber}</td>
+    </tr>
+  </table>
+</div>`;
+    pageNumber++;
+
+    const batchSize = 2;
+    for (let i = 0; i < areaInspections.length; i += batchSize) {
+      const batch = areaInspections.slice(i, i + batchSize);
+
+      html += `
+<div class="page-break"></div>
+<div class="page content-page">
+  <div class="header-row" style="display:flex; justify-content:space-between;">
+    <img src="${hostBase}/ocslogo.png" class="header-logo" style="height:35px;" />
+    <img src="${hostBase}/abclogo.png" class="header-logo" style="height:35px;" />
+  </div>
+
+  <div class="page-content" style="margin-top:8px;">`;
+
+      batch.forEach((inspection, index) => {
+        const risk = (inspection.RiskName || '').toUpperCase();
+        const riskColor = risk === 'CRITICAL' ? '#E10600'
+                        : risk === 'MAJOR' ? '#F4A259'
+                        : risk === 'MINOR' ? '#1E64C8'
+                        : risk === 'OBSERVATION' ? '#00A651'
+                        : '#5B9BD5';
+
+        const statusColor = inspection.Status === 'PASS' ? 'green' : '#C00000';
+
+        const photos = inspection.photos && inspection.photos.length > 0;
+        const photoUrl = photos ? `${hostBase}/images/${inspection.photos[0]}` : null;
+
+        // Dynamically remove image column if no photo
+        const imageColumn = photos
+          ? `<td rowspan="3" style="border:1px solid #000; width:130px; padding:0;">
+               <img src="${photoUrl}" style="width:100%; height:160px; object-fit:cover;" />
+             </td>`
+          : '';
+
+        const colspanPrimary = photos ? 2 : 3;
+        const colspanSec = photos ? 2 : 3;
+        const colspanComments = photos ? 7 : 8;
+
+        html += `
+<table style="width:100%; border-collapse:collapse; font-size:8.5pt; border:1.5px solid #000; margin-bottom:${index < batch.length - 1 ? '15px' : '0'};">
+  <tr>
+    <td style="border:1px solid #000; font-weight:bold;">Equipment No</td>
+    <td style="border:1px solid #000; font-weight:bold;">Area Name</td>
+    <td style="border:1px solid #000; font-weight:bold;">Location Name</td>
+    <td style="border:1px solid #000; font-weight:bold;">Equipment</td>
+    <td style="border:1px solid #000; font-weight:bold;">Control</td>
+    <td style="border:1px solid #000; font-weight:bold;">Risk</td>
+    <td style="border:1px solid #000; font-weight:bold;">Env Factor</td>
+    <td style="border:1px solid #000; font-weight:bold;">Consequence</td>
+    <td style="border:1px solid #000; font-weight:bold;">Serial No</td>
+    <td style="border:1px solid #000; font-weight:bold;">Status</td>
+    <td style="border:1px solid #000; font-weight:bold;">Repaired</td>
+    <td style="border:1px solid #000; font-weight:bold;">Inspector</td>
+  </tr>
+
+  <tr>
+    <td style="border:1px solid #000;">${inspection.EquipNumber || ''}</td>
+    <td style="border:1px solid #000;">${inspection.AreaName || ''}</td>
+    <td style="border:1px solid #000;">${inspection.LocationName || ''}</td>
+    <td style="border:1px solid #000;">${inspection.EquipmentName || ''}</td>
+    <td style="border:1px solid #000;">${inspection.Control || ''}</td>
+    <td style="border:1px solid #000; background:${riskColor}; font-weight:bold; color:white;">
+      ${inspection.RiskName || ''}
+    </td>
+    <td style="border:1px solid #000;">${inspection.EnvironFactor || ''}</td>
+    <td style="border:1px solid #000;">${inspection.Consequence || ''}</td>
+    <td style="border:1px solid #000;">${inspection.SerialNo || ''}</td>
+    <td style="border:1px solid #000; color:${statusColor}; font-weight:bold;">${inspection.Status || ''}</td>
+    <td style="border:1px solid #000;">${inspection.CARepairedStatus || ''}</td>
+    <td style="border:1px solid #000;">${inspection.InspectorName || ''}</td>
+  </tr>
+
+  <tr>
+    ${imageColumn}
+    <td colspan="${colspanPrimary}" style="border:1px solid #000; font-weight:bold;">Primary</td>
+    <td colspan="${colspanSec}" style="border:1px solid #000; font-weight:bold;">Secondary</td>
+    <td colspan="${colspanComments}" style="border:1px solid #000; font-weight:bold;">Comments</td>
+  </tr>
+
+  <tr style="height:100px; vertical-align:top;">
+    <td colspan="${colspanPrimary}" style="border:1px solid #000; text-align:left; padding:3px;">${inspection.PrimaryComments || ''}</td>
+    <td colspan="${colspanSec}" style="border:1px solid #000; text-align:left; padding:3px;">${inspection.SecondaryComments || ''}</td>
+    <td colspan="${colspanComments}" style="border:1px solid #000; text-align:left; padding:3px;">${inspection.Comments || ''}</td>
+  </tr>
+
+  <tr>
+    <td colspan="${photos ? 11 : 12}" style="border:1px solid #000; font-weight:bold; text-align:center;">
+      Observation
+    </td>
+  </tr>
+
+  <tr style="height:60px; vertical-align:top;">
+    <td colspan="${photos ? 11 : 12}" style="border:1px solid #000; text-align:left; padding:3px;">${inspection.Observation || ''}</td>
+  </tr>
+</table>`;
+      });
+
+      html += `
+  </div>
+
+  <table class="footer-table">
+    <tr>
+      <td><b>Asset</b></td><td>${projectName}</td>
+      <td><b>Inspected By</b></td><td>${inspectorName}</td>
+      <td colspan="2" style="text-align:right;">www.ocsgroup.com</td>
+    </tr>
+    <tr>
+      <td><b>Date</b></td><td>${inspectionMonthYear}</td>
+      <td><b>QA</b></td><td>Anna</td>
+      <td><b>Page</b></td><td>${pageNumber}</td>
+    </tr>
+  </table>
+</div>`;
+      pageNumber++;
+    }
+  });
+
+  return html;
+}
+
+// ---------------------------------------------------------
+// 🟦 PDF GENERATION — INCLUDING PAGE 10
+// ---------------------------------------------------------
 router.post("/reports/pdf", async (req, res) => {
   try {
     const inspections = Array.isArray(req.body.inspections) ? req.body.inspections : [];
     const hostBase = req.body.hostBase || `http://localhost:${process.env.PORT || 5000}`;
-    
+
     if (inspections.length === 0) {
       return res.status(400).json({ error: "No inspections provided" });
     }
 
-    // Group inspections by area
-    const groupedInspections = groupInspectionsByArea(inspections);
-    const areaSectionsHtml = buildAreaSectionsHtml(groupedInspections, hostBase);
-    
-    const stats = buildSummaryStats(inspections);
-    
-    // Generate charts
-    const charts = await generateCharts(groupedInspections);
-    
-    // Get project info from first inspection
-    const projectInfo = {
-      asset: inspections[0]?.AssetName || "E12C PROJECT",
-      location: inspections[0]?.LocationName || "SERIA BRUNEI DARUSSALAM",
-      client: "ELITE DRILLING SOUTH EAST ASIA",
-      inspector: inspections[0]?.InspectorName || "Inspection Team",
-      dateRange: inspections.length > 0 
-        ? `${new Date(inspections[0].DateInspected || inspections[0].createdAt).toLocaleDateString('en-GB')} - ${new Date(inspections[inspections.length - 1].DateInspected || inspections[inspections.length - 1].createdAt).toLocaleDateString('en-GB')}`
-        : new Date().toLocaleDateString('en-GB')
-    };
+    // Extract common dynamic fields
+    const first = inspections[0];
+    const formattedDate = new Date(first.DateInspected || Date.now())
+      .toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+      .replace(/ /g, "-");
+
+    const inspectionMonthYear = first?.DateInspected
+      ? new Date(first.DateInspected).toLocaleDateString("en-GB", { month: "long", year: "numeric" })
+      : "July 2015";
+
+    const clientName = escapeText(first?.ClientName || "HAZTECH SOLUTIONS");
+    const projectName = escapeText(first?.ProjectName || "E12C PROJECT SERIA BRUNEI DARUSSALAM");
+    const inspectorName = escapeText(first?.InspectorName || "Steve Watt");
+
+    // 🔵 Generate Chart Image  
+    // 🔵 Generate Charts
+const chartImage = await generateAreaSummaryChart(inspections);
+const correctiveActionChartBase64 = await generateCorrectiveActionChart(inspections);
+const locationChartBase64 = await generateLocationSummaryChart(inspections);
+const locationCorrectiveChartBase64 = await generateLocationCorrectiveActionChart(inspections);
+
+// Generate dynamic inspection pages with multiple rows per page
+const inspectionPagesHtml = generateInspectionTablesByArea(
+  inspections, 
+  hostBase, 
+  projectName, 
+  inspectorName, 
+  inspectionMonthYear
+);
+
 
     const html = `
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8" />
-  <title>DROPS Survey Inspection Report</title>
-  <style>
-    @page {
-      size: A4;
-      margin: 0;
-    }
-    
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-    
-    body {
-      font-family: 'Calibri', 'Arial', sans-serif;
-      font-size: 9pt;
-      line-height: 1.3;
-      color: #000;
-      margin: 0;
-      padding: 0;
-    }
-    
-    /* Page Container */
-    .page {
-      padding: 15mm 12mm;
-    }
-    
-    .page-with-header {
-      padding-top: 20mm;
-    }
-    
-    /* Cover Page */
-    .cover-page {
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      text-align: center;
-      page-break-after: always;
-      padding: 40px;
-    }
-    
-    .cover-logo {
-      width: 400px;
-      height: 200px;
-      margin-bottom: 40px;
-      background: #f0f0f0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #999;
-      font-size: 14pt;
-    }
-    
-    .logo-img {
-      max-width: 100%;
-      max-height: 100%;
-      object-fit: contain;
-    }
-    
-    .cover-title {
-      font-size: 32pt;
-      font-weight: bold;
-      margin-bottom: 60px;
-      color: #000;
-    }
-    
-    .cover-date {
-      font-size: 24pt;
-      font-weight: bold;
-      margin-bottom: 40px;
-    }
-    
-    .cover-client {
-      font-size: 18pt;
-      font-weight: bold;
-      margin-bottom: 30px;
-      text-transform: uppercase;
-    }
-    
-    .cover-project {
-      font-size: 20pt;
-      font-weight: bold;
-      margin-bottom: 50px;
-      text-transform: uppercase;
-    }
-    
-    .cover-footer {
-      font-size: 12pt;
-      margin-top: 40px;
-    }
-    
-    .cover-footer-line {
-      font-weight: bold;
-      margin-bottom: 20px;
-    }
-    
-    .cover-footer-contact {
-      color: #0088cc;
-      font-size: 14pt;
-    }
-    
-    /* Quality Assurance Page */
-    .qa-page {
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      page-break-after: always;
-      padding: 40px;
-    }
-    
-    .qa-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 60px;
-    }
-    
-    .qa-logo-left, .qa-logo-right {
-      width: 180px;
-      height: 80px;
-      background: #f0f0f0;
-      border: 2px dashed #ccc;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 10pt;
-      color: #999;
-    }
-    
-    .qa-title {
-      text-align: center;
-      font-size: 24pt;
-      font-weight: bold;
-      margin-bottom: 40px;
-    }
-    
-    .qa-description {
-      text-align: center;
-      font-size: 11pt;
-      margin-bottom: 60px;
-    }
-    
-    .qa-signatures {
-      width: 600px;
-      margin: 0 auto 60px;
-      border: 2px solid #000;
-    }
-    
-    .qa-sig-header {
-      text-align: center;
-      padding: 12px;
-      border-bottom: 2px solid #000;
-      font-weight: bold;
-    }
-    
-    .qa-sig-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      border-bottom: 2px solid #000;
-    }
-    
-    .qa-sig-row:last-child {
-      border-bottom: none;
-    }
-    
-    .qa-sig-cell {
-      padding: 20px;
-      text-align: center;
-      border-right: 2px solid #000;
-      font-weight: bold;
-    }
-    
-    .qa-sig-cell:last-child {
-      border-right: none;
-    }
-    
-    .qa-footer {
-      display: flex;
-      justify-content: space-between;
-      margin-top: auto;
-      font-size: 9pt;
-    }
-    
-    .qa-footer-item {
-      margin-bottom: 8px;
-    }
-    
-    .qa-footer-label {
-      font-weight: bold;
-      display: inline-block;
-      width: 140px;
-    }
-    
-    .qa-bottom-table {
-      margin-top: 40px;
-      width: 100%;
-      border: 2px solid #000;
-      border-collapse: collapse;
-    }
-    
-    .qa-bottom-table td {
-      padding: 12px;
-      border: 1px solid #000;
-      font-size: 9pt;
-    }
-    
-    .qa-bottom-label {
-      font-weight: bold;
-      width: 120px;
-    }
-    
-    /* Definitions Page */
-    .definitions-page {
-      page-break-after: always;
-      padding: 40px;
-    }
-    
-    .def-header {
-      display: flex;
-      justify-content: flex-end;
-      margin-bottom: 30px;
-    }
-    
-    .def-logo {
-      width: 120px;
-      height: 60px;
-      background: #f0f0f0;
-      border: 2px dashed #ccc;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 8pt;
-      color: #999;
-    }
-    
-    .def-title {
-      text-align: center;
-      font-size: 18pt;
-      font-weight: bold;
-      margin-bottom: 10px;
-    }
-    
-    .def-subtitle {
-      text-align: center;
-      font-size: 16pt;
-      font-weight: bold;
-      margin-bottom: 30px;
-    }
-    
-    .def-section {
-      margin-bottom: 30px;
-    }
-    
-    .def-section-title {
-      text-align: center;
-      font-size: 14pt;
-      font-weight: bold;
-      padding: 10px;
-      border: 2px solid #000;
-      background: #f0f0f0;
-    }
-    
-    .def-table {
-      width: 100%;
-      border: 2px solid #000;
-      border-top: none;
-      border-collapse: collapse;
-    }
-    
-    .def-table tr {
-      border-bottom: 2px solid #000;
-    }
-    
-    .def-table tr:last-child {
-      border-bottom: none;
-    }
-    
-    .def-table td:first-child {
-      width: 150px;
-      padding: 12px;
-      text-align: center;
-      font-weight: bold;
-      border-right: 2px solid #000;
-    }
-    
-    .def-table td:last-child {
-      padding: 12px;
-    }
-    
-    .def-critical { color: #dc2626; }
-    .def-major { color: #f97316; }
-    .def-minor { color: #0066cc; }
-    .def-observation { color: #22c55e; }
-    .def-repaired { color: #f59e0b; }
-    .def-pass { color: #22c55e; }
-    .def-fail { color: #dc2626; }
-    .def-no-access { color: #94a3b8; }
-    
-    .def-footer {
-      margin-top: 30px;
-      width: 100%;
-      border: 2px solid #000;
-      border-collapse: collapse;
-    }
-    
-    .def-footer td {
-      padding: 12px;
-      border: 1px solid #000;
-      font-size: 9pt;
-    }
-    
-    .def-footer-label {
-      font-weight: bold;
-      width: 120px;
-    }
-    
-    /* Analytics Page */
-    .analytics-page {
-      page-break-after: always;
-      padding: 40px;
-    }
-    
-    .analytics-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 30px;
-      padding-bottom: 20px;
-      border-bottom: 2px solid #003366;
-    }
-    
-    .analytics-logo {
-      width: 120px;
-      height: 60px;
-      background: #f0f0f0;
-      border: 2px dashed #ccc;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 8pt;
-      color: #999;
-    }
-    
-    .analytics-title-section {
-      flex: 1;
-      text-align: center;
-    }
-    
-    .analytics-main-title {
-      font-size: 22pt;
-      font-weight: bold;
-      color: #003366;
-      margin-bottom: 5px;
-    }
-    
-    .analytics-subtitle {
-      font-size: 12pt;
-      color: #666;
-    }
-    
-    .chart-container {
-      margin-bottom: 40px;
-      text-align: center;
-    }
-    
-    .chart-container img {
-      max-width: 100%;
-      height: auto;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      padding: 10px;
-      background: white;
-    }
-    
-    .chart-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 30px;
-      margin-bottom: 40px;
-    }
-    
-    .analytics-footer {
-      margin-top: auto;
-      width: 100%;
-      border: 2px solid #000;
-      border-collapse: collapse;
-    }
-    
-    .analytics-footer td {
-      padding: 12px;
-      border: 1px solid #000;
-      font-size: 9pt;
-    }
-    
-    .analytics-footer-label {
-      font-weight: bold;
-      width: 120px;
-    }
-    
-    /* Report Header */
-    .report-header {
-      border: 2px solid #000;
-      padding: 12px;
-      margin-bottom: 20px;
-      background: #f5f5f5;
-    }
-    
-    .header-top {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-bottom: 1px solid #666;
-      padding-bottom: 8px;
-      margin-bottom: 8px;
-    }
-    
-    .header-logo {
-      font-size: 18pt;
-      font-weight: bold;
-      color: #003366;
-    }
-    
-    .header-title {
-      text-align: right;
-    }
-    
-    .header-title h1 {
-      font-size: 14pt;
-      font-weight: bold;
-      margin-bottom: 4px;
-    }
-    
-    .header-title .subtitle {
-      font-size: 9pt;
-      color: #666;
-    }
-    
-    .header-info {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-      font-size: 8pt;
-    }
-    
-    .info-row {
-      display: flex;
-    }
-    
-    .info-label {
-      font-weight: bold;
-      width: 100px;
-    }
-    
-    .info-value {
-      flex: 1;
-    }
-    
-    /* Summary Stats */
-    .summary-stats {
-      display: grid;
-      grid-template-columns: repeat(7, 1fr);
-      gap: 8px;
-      margin-bottom: 16px;
-    }
-    
-    .stat-box {
-      border: 2px solid #003366;
-      padding: 8px;
-      text-align: center;
-      background: white;
-    }
-    
-    .stat-label {
-      font-size: 7pt;
-      font-weight: bold;
-      color: #666;
-      text-transform: uppercase;
-      margin-bottom: 4px;
-    }
-    
-    .stat-value {
-      font-size: 16pt;
-      font-weight: bold;
-      color: #003366;
-    }
-    
-    .stat-box.pass .stat-value { color: #22c55e; }
-    .stat-box.fail .stat-value { color: #ef4444; }
-    .stat-box.pending .stat-value { color: #f59e0b; }
-    .stat-box.critical .stat-value { color: #dc2626; }
-    .stat-box.major .stat-value { color: #f97316; }
-    .stat-box.minor .stat-value { color: #eab308; }
-    
-    /* Section Headers */
-    .section-header {
-      margin: 30px 0 20px 0;
-    }
-    
-    .section-header h2 {
-      font-size: 12pt;
-      font-weight: bold;
-      color: #003366;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-    }
-    
-    .section-line {
-      height: 2px;
-      background: #003366;
-      margin-top: 4px;
-    }
-    
-    /* Area Section Styles */
-    .area-section {
-      margin-bottom: 35px;
-      page-break-inside: avoid;
-    }
-    
-    .area-header {
-      background: white;
-      color: #000;
-      padding: 15px 20px;
-      margin-bottom: 16px;
-      border: 2px solid #000;
-      border-radius: 0;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    
-    .area-title {
-      font-size: 14pt;
-      font-weight: bold;
-      margin: 0;
-      color: #000;
-    }
-    
-    .area-stats {
-      display: flex;
-      gap: 18px;
-      font-size: 9pt;
-    }
-    
-    .area-stat {
-      padding: 5px 10px;
-      background: #f0f0f0;
-      border-radius: 4px;
-      font-weight: bold;
-      color: #000;
-    }
-    
-    .area-stat.pass { background: #22c55e; color: white; }
-    .area-stat.fail { background: #ef4444; color: white; }
-    
-    /* Inspection Box Styles */
-    .inspection-box {
-      border: 2px solid #000;
-      margin-bottom: 24px;
-      page-break-inside: avoid;
-      background: white;
-    }
-    
-    .inspection-header {
-      display: grid;
-      grid-template-columns: repeat(12, 1fr);
-      border-bottom: 2px solid #000;
-    }
-    
-   .header-cell {
-  padding: 14px 8px; /* More breathing space */
-  border-right: 1px solid #000;
-  font-size: 8pt;
-  text-align: center;
-  background: white;
-  line-height: 1.35; /* Better vertical alignment */
-  vertical-align: middle;
-  min-height: 42px; /* Makes cells equally tall */
-}
+<meta charset="utf-8" />
+<title>Drops Register</title>
 
-    
-    .header-cell:last-child {
-      border-right: none;
-    }
-    
-   .header-cell strong {
-  display: block;
-  margin-bottom: 6px;
-  font-size: 8pt;
-  line-height: 1.2;
-  color: #000;
-  font-weight: bold;
-  text-transform: uppercase;
-  letter-spacing: 0.25px;
-}
+<style>
+  @page { size: A4; margin: 0; }
+  * { box-sizing: border-box; }
 
-    /* Photos Section */
-    .photos-section {
-      display: flex;
-      gap: 10px;
-      padding: 15px;
-      border-bottom: 2px solid #000;
-      background: #fafafa;
-      flex-wrap: wrap;
-      justify-content: flex-start;
-    }
-    
-    .inspection-photo {
-      width: 180px;
-      height: 180px;
-      object-fit: cover;
-      border: 2px solid #ccc;
-      border-radius: 4px;
-    }
-    
-    /* Comments Section */
-    .comments-row {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 0;
-    }
-    
-    .comment-box {
-      padding: 12px;
-      border-right: 1px solid #000;
-      border-bottom: 1px solid #000;
-      font-size: 8pt;
-      min-height: 60px;
-    }
-    
-    .comment-box:nth-child(2n) {
-      border-right: none;
-    }
-    
-    .comment-box.full-width {
-      grid-column: 1 / -1;
-      border-right: none;
-    }
-    
-    .comment-label {
-      font-weight: bold;
-      margin-bottom: 6px;
-      color: #000;
-      font-size: 8pt;
-      text-transform: uppercase;
-    }
-    
-    .comment-text {
-      font-size: 8pt;
-      line-height: 1.4;
-      color: #333;
-    }
-    
-    .observation-row {
-      padding: 12px;
-      border-top: 2px solid #000;
-      background: #fffbf0;
-    }
-    
-    /* Badges */
-    .badge {
-      display: inline-block;
-      padding: 4px 10px;
-      border-radius: 4px;
-      font-size: 8pt;
-      font-weight: bold;
-      text-transform: uppercase;
-      white-space: nowrap;
-    }
-    
-    .status-pass { background: #22c55e; color: white; }
-    .status-fail { background: #ef4444; color: white; }
-    .status-pending { background: #f59e0b; color: white; }
-    .status-other { background: #94a3b8; color: white; }
-    
-    .risk-critical { background: #dc2626; color: white; }
-    .risk-major { background: #f97316; color: white; }
-    .risk-minor { background: #eab308; color: white; }
-    .risk-observation { background: #06b6d4; color: white; }
-    .risk- { background: #94a3b8; color: white; }
-    
-    /* Footer */
-    .report-footer {
-      margin-top: 30px;
-      padding-top: 12px;
-      border-top: 2px solid #003366;
-      font-size: 7pt;
-      color: #666;
-      display: flex;
-      justify-content: space-between;
-    }
-    
-    .footer-left {
-      font-weight: bold;
-    }
-    
-    .footer-right {
-      text-align: right;
-    }
-    
-    /* Page Break */
-    .page-break {
-      page-break-before: always;
-    }
-    
-    /* Print Optimization */
-    @media print {
-      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-      .inspection-box { page-break-inside: avoid; }
-      .area-section { page-break-inside: avoid; }
-      .inspection-photo { -webkit-print-color-adjust: exact; }
-      .area-header { -webkit-print-color-adjust: exact; }
-    }
-  </style>
+  body {
+    font-family: Calibri, Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    text-align: center;
+    color: #000;
+  }
+
+  /* COVER PAGE BASE */
+  .page {
+    width: 100%;
+    min-height: calc(100vh - 30mm);
+    padding: 0 12mm;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .cover-page {
+    justify-content: center;
+    align-items: center;
+  }
+
+  .cover-logo img { width: 380px; margin-bottom: 35px; }
+  .title { font-size: 32pt; font-weight: bold; margin-bottom: 35px; }
+  .date-text { font-size: 16pt; font-weight: 600; margin-bottom: 25px; }
+
+  .client-text, .project-text {
+    font-size: 15pt; font-weight: 700; text-transform: uppercase; margin-bottom: 18px;
+  }
+  .project-text { margin-bottom: 40px; }
+  .footer-text { font-size: 10.5pt; font-weight: 700; margin-bottom: 5px; }
+  .footer-links { margin-top: 3px; font-size: 11pt; color: #0078c9; font-weight: 600; }
+
+  /* INNER PAGES STRUCTURE */
+  .content-page {
+    padding: 10mm 12mm;
+    flex-direction: column;
+    display: flex;
+    text-align: center;
+    min-height: calc(100vh - 30mm);
+  }
+
+  .header-row {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .header-logo { height: 55px; object-fit: contain; }
+
+  /* Content area grows vertically and pushes footer */
+  .page-content {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .section-title {
+    font-size: 18pt;
+    font-weight: bold;
+    margin-bottom: 20px;
+  }
+
+  .subtext {
+    font-size: 10pt;
+    margin-bottom: 25px;
+  }
+
+  /* Signature table */
+  .signature-table {
+    width: 70%; max-width: 500px;
+    border: 1px solid #000;
+    border-collapse: collapse;
+    font-size: 10pt;
+    margin-bottom: 30px;
+  }
+  .signature-table td { border: 1px solid #000; padding: 10px; }
+  .signature-head { font-weight: bold; background: #fff; }
+
+  .info-row {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    font-size: 9pt;
+  }
+
+  /* FOOTER — ALWAYS STAYS AT BOTTOM */
+  .footer-table {
+    width: 100%;
+    border-collapse: collapse;
+    border: 1px solid #000;
+    font-size: 9pt;
+    table-layout: fixed;
+  }
+  .footer-table td {
+    padding: 8px;
+    border: 1px solid #000;
+  }
+
+  .page-break { page-break-before: always; }
+
+</style>
 </head>
 <body>
-  <!-- Cover Page -->
-  <div class="cover-page">
-    <div class="cover-logo">
-      <img src="${hostBase}/static/e28805cb-6174-4d0d-960b-b4bef57acca3 (1).png" class="logo-img" alt="Company Logo" />
-    </div>
-    
-    <div class="cover-title">Drops Register</div>
-    
-    <div class="cover-date">${new Date(inspections[0]?.DateInspected || Date.now()).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }).toUpperCase()}</div>
-    
-    <div class="cover-client">${escapeHtml(projectInfo.client || "HAZTECH SOLUTIONS")}</div>
-    
-    <div class="cover-project">${escapeHtml(projectInfo.asset)}</div>
-    
-    <div class="cover-footer">
-      <div class="cover-footer-line">Inspection by OCS Group – Inspection Division</div>
-      <div class="cover-footer-contact">www.ocsgroup.com | info@ocsgroup.com</div>
+
+<!-- PAGE 1 — COVER -->
+<div class="page cover-page">
+  <div class="cover-logo"><img src="${hostBase}/ocslogo.png" /></div>
+  <div class="title">Drops Register</div>
+  <div class="date-text">${formattedDate}</div>
+  <div class="client-text">${clientName}</div>
+  <div class="project-text">${projectName}</div>
+  <div class="footer-text">Inspection by OCS Group – Inspection Division</div>
+  <div class="footer-links">www.ocsgroup.com | info@ocsgroup.com</div>
+</div>
+
+<div class="page-break"></div>
+
+<!-- PAGE 2 — QUALITY ASSURANCE -->
+<div class="page content-page">
+  <div class="header-row">
+    <img src="${hostBase}/ocslogo.png" class="header-logo" />
+    <img src="${hostBase}/abclogo.png" class="header-logo" />
+  </div>
+
+  <div class="page-content">
+    <div class="section-title">QUALITY ASSURANCE</div>
+    <div class="subtext">The signatures below are to approve this document as accurate...</div>
+
+    <table class="signature-table">
+      <tr><td colspan="2" class="signature-head">(3 signatures required)</td></tr>
+      <tr><td>PROJECT MANAGEMENT</td><td></td></tr>
+      <tr><td>QUALITY ASSURANCE</td><td></td></tr>
+      <tr><td>OPERATIONS</td><td></td></tr>
+    </table>
+
+    <div class="info-row">
+      <div><b>Document Title:</b> Doc 1.0<br><b>Document Number:</b> 1</div>
+      <div><b>Revised By:</b> ${inspectorName}<br><b>Revision:</b> Anna</div>
+      <div><b>Approved By:</b> Mark Tranfield<br><b>Date:</b> 06-Nov-17</div>
     </div>
   </div>
 
-  <!-- Quality Assurance Page -->
-  <div class="qa-page">
-    <div class="qa-header">
-      <div class="qa-logo-left">[OCS Logo]</div>
-      <div class="qa-logo-right">[Client Logo]</div>
+  <table class="footer-table">
+    <tr><td><b>Asset</b></td><td>${projectName}</td><td><b>Inspected By</b></td><td>${inspectorName}</td><td colspan="2">www.ocsgroup.com</td></tr>
+    <tr><td><b>Date</b></td><td>${inspectionMonthYear}</td><td><b>QA Review</b></td><td>Anna</td><td><b>Page</b></td><td>2</td></tr>
+  </table>
+</div>
+
+<div class="page-break"></div>
+
+<!-- PAGE 3 — ACCREDITATIONS -->
+<div class="page content-page">
+  <div class="header-row">
+    <img src="${hostBase}/ocslogo.png" class="header-logo" />
+    <img src="${hostBase}/abclogo.png" class="header-logo" />
+  </div>
+
+  <div class="page-content">
+    <div class="section-title">OCS ACCREDITATIONS</div>
+
+    <div style="display:flex; justify-content:space-around; width:100%;">
+      <img src="${hostBase}/IADClogo.png" style="height:90px;" />
+      <img src="${hostBase}/houstonlogo.png" style="height:95px;" />
+      <img src="${hostBase}/dnv.png" style="height:90px;" />
     </div>
-    
-    <div class="qa-title">QUALITY ASSURANCE</div>
-    
-    <div class="qa-description">
-      The signatures below are to approve this document as accurate, and that it has been accepted for client distribution.
-    </div>
-    
-    <div class="qa-signatures">
-      <div class="qa-sig-header">(3 signatures required)</div>
-      <div class="qa-sig-row">
-        <div class="qa-sig-cell">PROJECT MANAGEMENT</div>
-        <div class="qa-sig-cell"></div>
-      </div>
-      <div class="qa-sig-row">
-        <div class="qa-sig-cell">QUALITY ASSURANCE</div>
-        <div class="qa-sig-cell"></div>
-      </div>
-      <div class="qa-sig-row">
-        <div class="qa-sig-cell">OPERATIONS</div>
-        <div class="qa-sig-cell"></div>
-      </div>
-    </div>
-    
-    <div class="qa-footer">
-      <div>
-        <div class="qa-footer-item">
-          <span class="qa-footer-label">Document Title:</span> Doc 1.0
-        </div>
-        <div class="qa-footer-item">
-          <span class="qa-footer-label">Document Number:</span> 1
-        </div>
-      </div>
-      <div>
-        <div class="qa-footer-item">
-          <span class="qa-footer-label">Revised By:</span> Anna
-        </div>
-        <div class="qa-footer-item">
-          <span class="qa-footer-label">Revision:</span> Anna
-        </div>
-      </div>
-      <div>
-        <div class="qa-footer-item">
-          <span class="qa-footer-label">Approved By:</span> Mark Tranfield
-        </div>
-        <div class="qa-footer-item">
-          <span class="qa-footer-label">Approval Date:</span> 06-Nov-17
-        </div>
-      </div>
-    </div>
-    
-    <table class="qa-bottom-table">
-      <tr>
-        <td class="qa-bottom-label">Asset</td>
-        <td>${escapeHtml(projectInfo.asset)}</td>
-        <td class="qa-bottom-label">Inspected By</td>
-        <td>${escapeHtml(projectInfo.inspector)}</td>
-        <td colspan="2">${escapeHtml("www.ocsgroup.com | info@ocsgroup.com")}</td>
-      </tr>
-      <tr>
-        <td class="qa-bottom-label">Inspection Date</td>
-        <td>${new Date(inspections[0]?.DateInspected || Date.now()).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</td>
-        <td class="qa-bottom-label">QA Review</td>
-        <td>Anna</td>
-        <td class="qa-bottom-label">Page No</td>
-        <td>2</td>
-      </tr>
+  </div>
+
+  <table class="footer-table">
+    <tr><td><b>Asset</b></td><td>${projectName}</td><td><b>Inspected By</b></td><td>${inspectorName}</td><td colspan="2">www.ocsgroup.com</td></tr>
+    <tr><td><b>Date</b></td><td>${inspectionMonthYear}</td><td><b>QA Review</b></td><td>Anna</td><td><b>Page</b></td><td>3</td></tr>
+  </table>
+</div>
+<div class="page-break"></div>
+
+<!-- PAGE 4 — TABLE OF CONTENTS -->
+<div class="page content-page">
+  <div class="header-row">
+    <img src="${hostBase}/ocslogo.png" class="header-logo" />
+    <img src="${hostBase}/abclogo.png" class="header-logo" />
+  </div>
+
+  <div class="page-content">
+    <div class="section-title" style="margin-bottom:30px;">TABLE OF CONTENTS</div>
+
+    <table style="width:80%; border-collapse:collapse; font-size:10pt;">
+      <tr><td style="width:50px; border:1px solid #000; font-weight:bold;">1</td><td style="border:1px solid #000; font-weight:bold;">DEFINITIONS</td></tr>
+      <tr><td style="border:1px solid #000; font-weight:bold;">2</td><td style="border:1px solid #000; font-weight:bold;">INSPECTION SUMMARY</td></tr>
+      <tr><td style="border:1px solid #000; font-weight:bold;">3</td><td style="border:1px solid #000; font-weight:bold;">GRAPHS</td></tr>
+      <tr><td style="border:1px solid #000; font-weight:bold;">4</td><td style="border:1px solid #000; font-weight:bold;">CORRECTIVE ACTION REGISTER</td></tr>
+      <tr><td style="border:1px solid #000;">4.1</td><td style="border:1px solid #000;">CROWN SECTION</td></tr>
+      <tr><td style="border:1px solid #000;">4.2</td><td style="border:1px solid #000;">MONKEY BOARD TO CROWN</td></tr>
+      <tr><td style="border:1px solid #000;">4.3</td><td style="border:1px solid #000;">PIPE DECKS</td></tr>
+      <tr><td style="border:1px solid #000;">4.4</td><td style="border:1px solid #000;">TRAVELING EQUIPMENTS</td></tr>
+      <tr><td style="border:1px solid #000; font-weight:bold;">5</td><td style="border:1px solid #000; font-weight:bold;">EQUIPMENT REGISTER</td></tr>
+      <tr><td style="border:1px solid #000;">5.1</td><td style="border:1px solid #000;">CROWN SECTION</td></tr>
+      <tr><td style="border:1px solid #000;">5.2</td><td style="border:1px solid #000;">CROWN SECTION - (A-FRAME, CROWN PLATFORM, WATER TABLE)</td></tr>
+      <tr><td style="border:1px solid #000;">5.3</td><td style="border:1px solid #000;">JACK HOUSES</td></tr>
+      <tr><td style="border:1px solid #000;">5.4</td><td style="border:1px solid #000;">LOWER SUBSTRUCTURE AND BOP DECK</td></tr>
+      <tr><td style="border:1px solid #000;">5.5</td><td style="border:1px solid #000;">MONKEY BOARD TO CROWN</td></tr>
+      <tr><td style="border:1px solid #000;">5.6</td><td style="border:1px solid #000;">PIPE DECKS</td></tr>
+      <tr><td style="border:1px solid #000;">5.7</td><td style="border:1px solid #000;">TRAVELING EQUIPMENTS</td></tr>
     </table>
   </div>
 
-  <!-- Definitions Page -->
-  <div class="definitions-page">
-    <div class="def-header">
-      <div class="def-logo">[Client Logo]</div>
+  <table class="footer-table">
+    <tr>
+      <td><b>Asset</b></td><td>${projectName}</td>
+      <td><b>Inspected By</b></td><td>${inspectorName}</td>
+      <td colspan="2">www.ocsgroup.com | info@ocsgroup.com</td>
+    </tr>
+    <tr>
+      <td><b>Inspection Date</b></td><td>${inspectionMonthYear}</td>
+      <td><b>QA Review</b></td><td>Anna</td>
+      <td><b>Page</b></td><td>4</td>
+    </tr>
+  </table>
+</div>
+<div class="page-break"></div>
+
+<!-- PAGE 5 — DEFINITIONS -->
+<div class="page content-page">
+
+  <!-- HEADER -->
+  <div class="header-row">
+    <img src="${hostBase}/ocslogo.png" class="header-logo" />
+    <img src="${hostBase}/abclogo.png" class="header-logo" />
+  </div>
+
+  <!-- CONTENT WITH WATERMARK -->
+  <div class="page-content" style="position:relative; display:flex; justify-content:center; align-items:center;">
+
+      <!-- WATERMARK -->
+      <img 
+        src="${hostBase}/ocslogo.png"
+        style="
+          position:absolute;
+          width:60%;
+          height:auto;
+          opacity:0.13;
+          filter:blur(0.5px);
+          user-select:none;
+        "
+      />
+
+      <!-- CENTER TITLE -->
+      <div style="font-size:16pt; font-weight:bold; z-index:10; letter-spacing:0.5px;">
+        DEFINITIONS
+      </div>
+  </div>
+
+  <!-- FOOTER -->
+  <table class="footer-table">
+    <tr>
+      <td><b>Asset</b></td><td>${projectName}</td>
+      <td><b>Inspected By</b></td><td>${inspectorName}</td>
+      <td colspan="2">www.ocsgroup.com | info@ocsgroup.com</td>
+    </tr>
+    <tr>
+      <td><b>Inspection Date</b></td><td>${inspectionMonthYear}</td>
+      <td><b>QA Review</b></td><td>Anna</td>
+      <td><b>Page</b></td><td>5</td>
+    </tr>
+  </table>
+
+</div>
+<div class="page-break"></div>
+
+<!-- PAGE 6 — DROPS AREA EQUIPMENT REGISTER DEFINITIONS -->
+<div class="page content-page">
+
+  <!-- HEADER -->
+  <div class="header-row">
+    <img src="${hostBase}/ocslogo.png" class="header-logo" />
+    <img src="${hostBase}/abclogo.png" class="header-logo" />
+  </div>
+
+  <!-- PAGE TITLE -->
+  <div class="page-content" style="margin-top:15px;">
+
+    <h2 class="section-title" style="margin-bottom:5px;">
+      DROPS AREA EQUIPMENT REGISTER
+    </h2>
+    <div style="font-size:11pt; font-weight:bold; margin-bottom:18px;">
+      DEFINITIONS
     </div>
-    
-    <div class="def-title">DROPS AREA EQUIPMENT REGISTER</div>
-    <div class="def-subtitle">DEFINITIONS</div>
-    
-    <div class="def-section">
-      <div class="def-section-title">FAULT CLASSIFICATION</div>
-      <table class="def-table">
-        <tr>
-          <td class="def-critical">CRITICAL</td>
-          <td>A defect identified in Zone 0 that compromises the hazardous area design and integrity of the equipment that if left uncorrected may lead equipment failure, Asset damage, personal injury or death. See example sheet.</td>
-        </tr>
-        <tr>
-          <td class="def-major">MAJOR</td>
-          <td>A defect identified in Zone 1 that could compromise the integrity of the equipment, that if left uncorrected may lead to equipment failure, Asset damage, personal injury or death. See example sheet.</td>
-        </tr>
-        <tr>
-          <td class="def-minor">MINOR</td>
-          <td>A defect identified in Zone 2 that compromises the regulatory suitability of the equipment. See example sheet.</td>
-        </tr>
-        <tr>
-          <td class="def-observation">OBSERVATION</td>
-          <td>A significant detail, not to be considered a defect, but still worthy of notation.</td>
-        </tr>
-        <tr>
-          <td class="def-repaired">REPAIRED</td>
-          <td>An identified defect, either Critical, Major or Minor, that has since been repaired by competent personnel and re-inspected, and is no longer considered a defect.</td>
-        </tr>
-      </table>
-    </div>
-    
-    <div class="def-section">
-      <div class="def-section-title">STATUS</div>
-      <table class="def-table">
-        <tr>
-          <td class="def-pass">PASS</td>
-          <td>Equipment found to be in good working order, acceptable for the area installed.</td>
-        </tr>
-        <tr>
-          <td class="def-fail">FAIL</td>
-          <td>Equipment found to be in poor condition, or unacceptable for the area installed.</td>
-        </tr>
-        <tr>
-          <td class="def-no-access">NO ACCESS</td>
-          <td>Equipment was unable to be inspected due to lack of access.</td>
-        </tr>
-      </table>
-    </div>
-    
-    <table class="def-footer">
+
+    <!-- TABLE 1: FAULT CLASSIFICATION -->
+    <table style="width:100%; border-collapse:collapse; font-size:10pt; text-align:left; margin-bottom:18px;">
       <tr>
-        <td class="def-footer-label">Asset</td>
-        <td>${escapeHtml(projectInfo.asset)}</td>
-        <td class="def-footer-label">Inspected By</td>
-        <td>${escapeHtml(projectInfo.inspector)}</td>
-        <td colspan="2">${escapeHtml("www.ocsgroup.com | info@ocsgroup.com")}</td>
+        <td colspan="2" style="border:1px solid #000; font-weight:bold; text-align:center; background:#f7f7f7;">
+          FAULT CLASSIFICATION
+        </td>
       </tr>
+
       <tr>
-        <td class="def-footer-label">Inspection Date</td>
-        <td>${new Date(inspections[0]?.DateInspected || Date.now()).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</td>
-        <td class="def-footer-label">QA Review</td>
-        <td>Anna</td>
-        <td class="def-footer-label">Page No</td>
-        <td>3</td>
+        <td style="border:1px solid #000; font-weight:bold; color:red; width:110px; text-align:center;">CRITICAL</td>
+        <td style="border:1px solid #000;">
+          A defect identified in Zone 0 that compromises the hazardous area design and integrity of the equipment that if left 
+          uncorrected may lead equipment failure, Asset damage, personal injury or death. See example sheet.
+        </td>
       </tr>
+
+      <tr>
+        <td style="border:1px solid #000; font-weight:bold; color:#e69138; text-align:center;">MAJOR</td>
+        <td style="border:1px solid #000;">
+          A defect identified in Zone 1 that could compromise the integrity of the equipment, that if left uncorrected may lead 
+          to equipment failure, Asset damage, personal injury or death. See example sheet.
+        </td>
+      </tr>
+
+      <tr>
+        <td style="border:1px solid #000; font-weight:bold; color:#3c78d8; text-align:center;">MINOR</td>
+        <td style="border:1px solid #000;">
+          A defect identified in Zone 2 that compromises the regulatory suitability of the equipment. See example sheet.
+        </td>
+      </tr>
+
+      <tr>
+        <td style="border:1px solid #000; font-weight:bold; color:green; text-align:center;">OBSERVATION</td>
+        <td style="border:1px solid #000;">
+          A significant detail, not to be considered a defect, but still worthy of notation.
+        </td>
+      </tr>
+
+      <tr>
+        <td style="border:1px solid #000; font-weight:bold; color:#cc7a00; text-align:center;">REPAIRED</td>
+        <td style="border:1px solid #000;">
+          An identified defect, either Critical, Major or Minor, that has since been repaired by competent personnel and 
+          re-inspected, and is no longer considered a defect.
+        </td>
+      </tr>
+    </table>
+
+    <!-- TABLE 2: STATUS -->
+    <table style="width:100%; border-collapse:collapse; font-size:10pt; text-align:left; margin-bottom:18px;">
+      <tr>
+        <td colspan="2" style="border:1px solid #000; font-weight:bold; text-align:center; background:#f7f7f7;">STATUS</td>
+      </tr>
+
+      <tr>
+        <td style="border:1px solid #000; font-weight:bold; color:green; width:110px; text-align:center;">PASS</td>
+        <td style="border:1px solid #000;">
+          Equipment found to be in good working order, acceptable for the area installed.
+        </td>
+      </tr>
+
+      <tr>
+        <td style="border:1px solid #000; font-weight:bold; color:red; text-align:center;">FAIL</td>
+        <td style="border:1px solid #000;">
+          Equipment found to be in poor condition, or unacceptable for the area installed.
+        </td>
+      </tr>
+
+      <tr style="background:#f2f2f2;">
+        <td style="border:1px solid #000; font-weight:bold; color:#666; text-align:center;">NO ACCESS</td>
+        <td style="border:1px solid #000;">
+          Equipment was unable to be inspected due to lack of access.
+        </td>
+      </tr>
+    </table>
+
+  </div>
+
+  <!-- FOOTER -->
+  <table class="footer-table">
+    <tr>
+      <td><b>Asset</b></td><td>${projectName}</td>
+      <td><b>Inspected By</b></td><td>${inspectorName}</td>
+      <td colspan="2">www.ocsgroup.com | info@ocsgroup.com</td>
+    </tr>
+    <tr>
+      <td><b>Inspection Date</b></td><td>${inspectionMonthYear}</td>
+      <td><b>QA Review</b></td><td>Anna</td>
+      <td><b>Page</b></td><td>6</td>
+    </tr>
+  </table>
+
+</div>
+<div class="page-break"></div>
+
+<!-- PAGE 5 — DEFINITIONS -->
+<div class="page content-page">
+
+  <!-- HEADER -->
+  <div class="header-row">
+    <img src="${hostBase}/ocslogo.png" class="header-logo" />
+    <img src="${hostBase}/abclogo.png" class="header-logo" />
+  </div>
+
+  <!-- CONTENT WITH WATERMARK -->
+  <div class="page-content" style="position:relative; display:flex; justify-content:center; align-items:center;">
+
+      <!-- WATERMARK -->
+      <img 
+        src="${hostBase}/ocslogo.png"
+        style="
+          position:absolute;
+          width:60%;
+          height:auto;
+          opacity:0.13;
+          filter:blur(0.5px);
+          user-select:none;
+        "
+      />
+
+      <!-- CENTER TITLE -->
+      <div style="font-size:16pt; font-weight:bold; z-index:10; letter-spacing:0.5px;">
+        SUMMARY
+      </div>
+  </div>
+
+  <!-- FOOTER -->
+  <table class="footer-table">
+    <tr>
+      <td><b>Asset</b></td><td>${projectName}</td>
+      <td><b>Inspected By</b></td><td>${inspectorName}</td>
+      <td colspan="2">www.ocsgroup.com | info@ocsgroup.com</td>
+    </tr>
+    <tr>
+      <td><b>Inspection Date</b></td><td>${inspectionMonthYear}</td>
+      <td><b>QA Review</b></td><td>Anna</td>
+      <td><b>Page</b></td><td>7</td>
+    </tr>
+  </table>
+
+</div>
+<div class="page-break"></div>
+
+<!-- PAGE 9 — SUMMARY -->
+<div class="page content-page" style="font-size:9pt; line-height:1.28;">
+
+  <!-- HEADER -->
+  <div class="header-row">
+    <img src="${hostBase}/ocslogo.png" class="header-logo" />
+    <img src="${hostBase}/abclogo.png" class="header-logo" />
+  </div>
+
+  <!-- CONTENT -->
+  <div class="page-content" style="margin-top:10px; text-align:left;">
+
+    <!-- PAGE TITLE -->
+    <h2 class="section-title" style="text-align:center; margin-bottom:18px; font-size:13pt;">
+      SUMMARY
+    </h2>
+
+    <!-- SUB HEADINGS -->
+    <div style="font-weight:bold; font-size:10pt; line-height:1.25; margin-bottom:6px; text-transform:uppercase;">
+      ELITE DRILLING SOUTH EAST ASIA SENDIRIAN BERHAD
+      <br>DROPS JUNE 2019
+      <br>DROPPED OBJECTS PREVENTION SCHEME
+    </div>
+
+    <!-- PARAGRAPH BLOCK -->
+    <p style="margin-top:4px;">
+      <span style="font-weight:bold; color:#004a8f;">OCS Group</span> has been engaged to carry out DROPS SURVEY INSPECTION onboard the 
+      E12C LAND RIG belonging to ELITE DRILLING SOUTH EAST ASIA SENDIRIAN BERHAD on behalf of SHELL BRUNEI PETROLEUM BERHAD in SERIA 
+      Brunei Darussalam from 21st June 2019 to 28th June 2019. The objective is to inspect all Facilities and Locations for any 
+      uncontrolled object that has potential to fall. The DROPPED OBJECTS PREVENTION SCHEME applies to all onshore and offshore locations. 
+      The implementation of Restricted Access Areas helps reduce exposure to dropped objects, but is only effective with proper awareness, 
+      planning, mitigation and control systems in place.
+    </p>
+
+    <!-- SUBTITLE -->
+    <div style="margin-top:6px; font-weight:bold; font-size:10pt;">Work Brief</div>
+
+    <p>
+      The DROPS SURVEY provides ELITE DRILLING with monitored control measures and maintenance procedure systems for securement and 
+      secondary retention. The final report includes INVENTORY LIST, SURVEY ANALYSIS, CORRECTIVE ACTION and DRAWINGS. Close visual 
+      inspection using industrial rope access was carried out to safely reach difficult locations. Work was completed on 27th June 2019.
+    </p>
+
+    <!-- EXECUTIVE SUMMARY -->
+    <div style="margin-top:6px; font-weight:bold; font-size:10pt;">1.2 Executive Summary</div>
+
+    <p>
+      OCS Group appreciates the cooperation of ELITE DRILLING SOUTH EAST ASIA SENDIRIAN BERHAD. Overall equipment condition was good with 
+      most corrective actions identified as minor. A total of 343 items were inspected, 311 were satisfactory, and 32 required corrective action.
+    </p>
+
+    <!-- NUMBERED LIST -->
+    <ul style="margin-left:14px; margin-top:4px;">
+      <li>Gin Pole / Crown Structures and Equipment</li>
+      <li>Upper Mast Section and Equipment (Column 4 & 5)</li>
+      <li>Monkey Board Section and Equipment</li>
+      <li>Lower Mast Section and Equipment (Column 1 to 3)</li>
+      <li>Drill Floor Section</li>
+      <li>BOP Section and Equipment</li>
+      <li>Mud Pump Section</li>
+      <li>Mud Pit Section</li>
+      <li>Gamboa Section</li>
+      <li>Shale Shaker Section</li>
+      <li>Mud Gas Separator Section</li>
+      <li>Mud Dispenser Section</li>
+      <li>Wire Spool Section</li>
+    </ul>
+
+  </div>
+
+  <!-- FOOTER -->
+  <table class="footer-table">
+    <tr>
+      <td><b>Asset</b></td><td>${projectName}</td>
+      <td><b>Inspected By</b></td><td>${inspectorName}</td>
+      <td colspan="2">www.ocsgroup.com | info@ocsgroup.com</td>
+    </tr>
+    <tr>
+      <td><b>Inspection Date</b></td><td>${inspectionMonthYear}</td>
+      <td><b>QA Review</b></td><td>Anna</td>
+      <td><b>Page</b></td><td>8</td>
+    </tr>
+  </table>
+
+</div>
+<div class="page-break"></div>
+
+<!-- PAGE 5 — DEFINITIONS -->
+<div class="page content-page">
+
+  <!-- HEADER -->
+  <div class="header-row">
+    <img src="${hostBase}/ocslogo.png" class="header-logo" />
+    <img src="${hostBase}/abclogo.png" class="header-logo" />
+  </div>
+
+  <!-- CONTENT WITH WATERMARK -->
+  <div class="page-content" style="position:relative; display:flex; justify-content:center; align-items:center;">
+
+      <!-- WATERMARK -->
+      <img 
+        src="${hostBase}/ocslogo.png"
+        style="
+          position:absolute;
+          width:60%;
+          height:auto;
+          opacity:0.13;
+          filter:blur(0.5px);
+          user-select:none;
+        "
+      />
+
+      <!-- CENTER TITLE -->
+      <div style="font-size:16pt; font-weight:bold; z-index:10; letter-spacing:0.5px;">
+        INSPECTION ANALYSIS AND TRENDING
+      </div>
+  </div>
+
+  <!-- FOOTER -->
+  <table class="footer-table">
+    <tr>
+      <td><b>Asset</b></td><td>${projectName}</td>
+      <td><b>Inspected By</b></td><td>${inspectorName}</td>
+      <td colspan="2">www.ocsgroup.com | info@ocsgroup.com</td>
+    </tr>
+    <tr>
+      <td><b>Inspection Date</b></td><td>${inspectionMonthYear}</td>
+      <td><b>QA Review</b></td><td>Anna</td>
+      <td><b>Page</b></td><td>9</td>
+    </tr>
+  </table>
+
+</div>
+
+<div class="page-break"></div>
+
+<!-- PAGE 5 — DEFINITIONS -->
+<div class="page content-page">
+
+  <!-- HEADER -->
+  <div class="header-row">
+    <img src="${hostBase}/ocslogo.png" class="header-logo" />
+    <img src="${hostBase}/abclogo.png" class="header-logo" />
+  </div>
+
+  <!-- CONTENT WITH WATERMARK -->
+  <div class="page-content" style="position:relative; display:flex; justify-content:center; align-items:center;">
+
+      <!-- WATERMARK -->
+  
+
+      <!-- CENTER TITLE -->
+      <div style="font-size:16pt; font-weight:bold; z-index:10; letter-spacing:0.5px;">
+      <div class="chart-box">
+    <img src="${chartImage}" style="width:100%; max-height:75vh; object-fit:contain;"/>
+  </div>
+      </div>
+  </div>
+
+  <!-- FOOTER -->
+  <table class="footer-table">
+    <tr>
+      <td><b>Asset</b></td><td>${projectName}</td>
+      <td><b>Inspected By</b></td><td>${inspectorName}</td>
+      <td colspan="2">www.ocsgroup.com | info@ocsgroup.com</td>
+    </tr>
+    <tr>
+      <td><b>Inspection Date</b></td><td>${inspectionMonthYear}</td>
+      <td><b>QA Review</b></td><td>Anna</td>
+      <td><b>Page</b></td><td>10</td>
+    </tr>
+  </table>
+
+</div>
+<div class="page-break"></div>
+
+<!-- PAGE 5 — DEFINITIONS -->
+<div class="page content-page">
+
+  <!-- HEADER -->
+  <div class="header-row">
+    <img src="${hostBase}/ocslogo.png" class="header-logo" />
+    <img src="${hostBase}/abclogo.png" class="header-logo" />
+  </div>
+
+  <!-- CONTENT WITH WATERMARK -->
+  <div class="page-content" style="margin-top:10px; text-align:center;">
+    <h2 class="section-title" style="margin-bottom:10px;">
+      Area Based Corrective Action Register Overall Summary
+    </h2>
+
+    <img src="data:image/png;base64,${correctiveActionChartBase64}"
+         style="width:92%; margin:auto; height:auto;" />
+  </div>
+
+  <!-- FOOTER -->
+  <table class="footer-table">
+    <tr>
+      <td><b>Asset</b></td><td>${projectName}</td>
+      <td><b>Inspected By</b></td><td>${inspectorName}</td>
+      <td colspan="2">www.ocsgroup.com | info@ocsgroup.com</td>
+    </tr>
+    <tr>
+      <td><b>Inspection Date</b></td><td>${inspectionMonthYear}</td>
+      <td><b>QA Review</b></td><td>Anna</td>
+      <td><b>Page</b></td><td>11</td>
+    </tr>
+  </table>
+
+</div>
+<div class="page-break"></div>
+
+<!-- PAGE 5 — DEFINITIONS -->
+<div class="page content-page">
+
+  <!-- HEADER -->
+  <div class="header-row">
+    <img src="${hostBase}/ocslogo.png" class="header-logo" />
+    <img src="${hostBase}/abclogo.png" class="header-logo" />
+  </div>
+
+  <!-- CONTENT WITH WATERMARK -->
+ <div class="page-content" style="margin-top:10px; text-align:center;">
+    <h2 class="section-title" style="margin-bottom:10px;">
+      Location Based Dropped Object Overall Summary
+    </h2>
+
+    <img src="data:image/png;base64,${locationChartBase64}" 
+         style="width:92%; margin:auto; height:auto;" />
+  </div>
+
+  <!-- FOOTER -->
+  <table class="footer-table">
+    <tr>
+      <td><b>Asset</b></td><td>${projectName}</td>
+      <td><b>Inspected By</b></td><td>${inspectorName}</td>
+      <td colspan="2">www.ocsgroup.com | info@ocsgroup.com</td>
+    </tr>
+    <tr>
+      <td><b>Inspection Date</b></td><td>${inspectionMonthYear}</td>
+      <td><b>QA Review</b></td><td>Anna</td>
+      <td><b>Page</b></td><td>12</td>
+    </tr>
+  </table>
+
+</div>
+<div class="page-break"></div>
+
+<!-- PAGE 5 — DEFINITIONS -->
+<div class="page content-page">
+
+  <!-- HEADER -->
+  <div class="header-row">
+    <img src="${hostBase}/ocslogo.png" class="header-logo" />
+    <img src="${hostBase}/abclogo.png" class="header-logo" />
+  </div>
+
+  <!-- CONTENT WITH WATERMARK -->
+  <div class="page-content" style="margin-top:10px; text-align:center;">
+    <h2 class="section-title" style="margin-bottom:10px;">
+      Location Based Corrective Action Register Overall Summary
+    </h2>
+
+    <img src="data:image/png;base64,${locationCorrectiveChartBase64}"
+         style="width:92%; margin:auto; height:auto;" />
+  </div>
+
+  <!-- FOOTER -->
+  <table class="footer-table">
+    <tr>
+      <td><b>Asset</b></td><td>${projectName}</td>
+      <td><b>Inspected By</b></td><td>${inspectorName}</td>
+      <td colspan="2">www.ocsgroup.com | info@ocsgroup.com</td>
+    </tr>
+    <tr>
+      <td><b>Inspection Date</b></td><td>${inspectionMonthYear}</td>
+      <td><b>QA Review</b></td><td>Anna</td>
+      <td><b>Page</b></td><td>13</td>
+    </tr>
+  </table>
+
+</div>
+
+<div class="page-break"></div>
+
+<!-- PAGE 5 — DEFINITIONS -->
+<div class="page content-page">
+
+  <!-- HEADER -->
+  <div class="header-row">
+    <img src="${hostBase}/ocslogo.png" class="header-logo" />
+    <img src="${hostBase}/abclogo.png" class="header-logo" />
+  </div>
+
+  <!-- CONTENT WITH WATERMARK -->
+  <div class="page-content" style="position:relative; display:flex; justify-content:center; align-items:center;">
+
+      <!-- WATERMARK -->
+      <img 
+        src="${hostBase}/ocslogo.png"
+        style="
+          position:absolute;
+          width:60%;
+          height:auto;
+          opacity:0.13;
+          filter:blur(0.5px);
+          user-select:none;
+        "
+      />
+
+      <!-- CENTER TITLE -->
+      <div style="font-size:16pt; font-weight:bold; z-index:10; letter-spacing:0.5px;">
+        CORRECTIVE ACTION REGISTER
+      </div>
+  </div>
+
+  <!-- FOOTER -->
+  <table class="footer-table">
+    <tr>
+      <td><b>Asset</b></td><td>${projectName}</td>
+      <td><b>Inspected By</b></td><td>${inspectorName}</td>
+      <td colspan="2">www.ocsgroup.com | info@ocsgroup.com</td>
+    </tr>
+    <tr>
+      <td><b>Inspection Date</b></td><td>${inspectionMonthYear}</td>
+      <td><b>QA Review</b></td><td>Anna</td>
+      <td><b>Page</b></td><td>14</td>
+    </tr>
+  </table>
+
+</div>
+<div class="page-break"></div>
+
+<!-- PAGE 5 — DEFINITIONS -->
+<div class="page content-page">
+
+  <!-- HEADER -->
+  <div class="header-row">
+    <img src="${hostBase}/ocslogo.png" class="header-logo" />
+    <img src="${hostBase}/abclogo.png" class="header-logo" />
+  </div>
+
+  <!-- CONTENT WITH WATERMARK -->
+  <div class="page-content" style="position:relative; display:flex; justify-content:center; align-items:center;">
+
+      <!-- WATERMARK -->
+      <img 
+        src="${hostBase}/ocslogo.png"
+        style="
+          position:absolute;
+          width:60%;
+          height:auto;
+          opacity:0.13;
+          filter:blur(0.5px);
+          user-select:none;
+        "
+      />
+
+      <!-- CENTER TITLE -->
+      <div style="font-size:16pt; font-weight:bold; z-index:10; letter-spacing:0.5px;">
+        CROWN SECTION
+      </div>
+  </div>
+
+  <!-- FOOTER -->
+  <table class="footer-table">
+    <tr>
+      <td><b>Asset</b></td><td>${projectName}</td>
+      <td><b>Inspected By</b></td><td>${inspectorName}</td>
+      <td colspan="2">www.ocsgroup.com | info@ocsgroup.com</td>
+    </tr>
+    <tr>
+      <td><b>Inspection Date</b></td><td>${inspectionMonthYear}</td>
+      <td><b>QA Review</b></td><td>Anna</td>
+      <td><b>Page</b></td><td>14</td>
+    </tr>
+  </table>
+
+</div>
+<div class="page-break"></div>
+<!-- PAGE — SAMPLE EQUIPMENT REGISTER ROW -->
+<div class="page content-page">
+
+  <!-- HEADER -->
+  <div class="header-row" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+    <img src="${hostBase}/ocslogo.png" class="header-logo" style="height:35px; width:auto;" />
+    <img src="${hostBase}/abclogo.png" class="header-logo" style="height:35px; width:auto;" />
+  </div>
+
+  <!-- CONTENT -->
+  <div class="page-content" style="margin-top:10px;">
+
+    <table style="width:100%; border-collapse:collapse; font-family:Calibri; font-size:8.5pt; text-align:center; border:1.5px solid #000;">
+      
+      <!-- HEADER ROW -->
+      <tr style="height:28px;">
+        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Equipment No</td>
+        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Area Name</td>
+        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Location Name</td>
+        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Equipment</td>
+        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Control</td>
+        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Risk</td>
+        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Environmental<br>Factor</td>
+        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Consequence</td>
+        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Serial No</td>
+        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Status</td>
+        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Repaired Status</td>
+        <td style="border:1px solid #000; font-weight:bold; padding:3px;">Inspector</td>
+      </tr>
+
+      <!-- DATA ROW -->
+      <tr style="height:30px;">
+        <td style="border:1px solid #000; padding:3px;">OCS-0005</td>
+        <td style="border:1px solid #000; padding:3px;">CROWN SECTION</td>
+        <td style="border:1px solid #000; padding:3px;">GIN POLE /CROWN</td>
+        <td style="border:1px solid #000; padding:3px;">IN REEL</td>
+        <td style="border:1px solid #000; padding:3px;">Weekly</td>
+        <td style="border:1px solid #000; padding:3px; background:#5B9BD5; font-weight:bold; color:#fff;">MINOR</td>
+        <td style="border:1px solid #000; padding:3px;">Visibility</td>
+        <td style="border:1px solid #000; padding:3px;">Severe</td>
+        <td style="border:1px solid #000; padding:3px;">111</td>
+        <td style="border:1px solid #000; padding:3px; color:#C00000; font-weight:bold;">FAIL</td>
+        <td style="border:1px solid #000; padding:3px;">OPEN</td>
+        <td style="border:1px solid #000; padding:3px;">Steve Watt</td>
+      </tr>
+
+      <!-- IMAGE + COMMENT HEADER ROW -->
+      <tr style="height:22px;">
+        <td rowspan="3" style="border:1px solid #000; width:130px; padding:0; vertical-align:top;">
+          <img src="${hostBase}/rig-photos.png" style="width:100%; height:180px; object-fit:cover; display:block;" />
+        </td>
+        <td colspan="2" style="border:1px solid #000; font-weight:bold; padding:3px; background:#fff;">Primary Comments</td>
+        <td colspan="2" style="border:1px solid #000; font-weight:bold; padding:3px; background:#fff;">Secondary Comments</td>
+        <td colspan="7" style="border:1px solid #000; font-weight:bold; padding:3px; background:#fff;">Comments</td>
+      </tr>
+
+      <!-- COMMENT CONTENT ROW -->
+      <tr style="height:120px; vertical-align:top;">
+        <td colspan="2" style="border:1px solid #000; padding:4px; text-align:left; font-size:8pt;"></td>
+        <td colspan="2" style="border:1px solid #000; padding:4px; text-align:left; font-size:8pt;"></td>
+        <td colspan="7" style="border:1px solid #000; padding:6px; text-align:left; font-size:8pt; line-height:1.3;">
+          Are bolts secured with an approved locking method<br>i.e. double nut or lock wire
+        </td>
+      </tr>
+
+      <!-- OBSERVATION HEADER ROW -->
+      <tr style="height:22px;">
+        <td colspan="11" style="border:1px solid #000; font-weight:bold; text-align:center; padding:3px; background:#fff;">Observation</td>
+      </tr>
+
     </table>
   </div>
 
-  <!-- Analytics Page with Charts -->
-  <div class="analytics-page">
-    <div class="analytics-header">
-      <div class="analytics-logo">[Client Logo]</div>
-      <div class="analytics-title-section">
-        <div class="analytics-main-title">INSPECTION ANALYTICS</div>
-        <div class="analytics-subtitle">Visual Summary of Risk and Status Distribution</div>
-      </div>
-      <div class="analytics-logo">[OCS Logo]</div>
-    </div>
-    
-    <!-- Main Area Risk Chart -->
-    <div class="chart-container">
-      <img src="${charts.riskChart}" alt="Risk Classification by Area" />
-    </div>
-    
-    <!-- Status and Risk Distribution Grid -->
-    <div class="chart-grid">
-      <div class="chart-container">
-        <img src="${charts.statusChart}" alt="Overall Status Distribution" />
-      </div>
-      <div class="chart-container">
-        <img src="${charts.riskDistChart}" alt="Risk Level Distribution" />
-      </div>
-    </div>
-    
-    <table class="analytics-footer">
-      <tr>
-        <td class="analytics-footer-label">Asset</td>
-        <td>${escapeHtml(projectInfo.asset)}</td>
-        <td class="analytics-footer-label">Inspected By</td>
-        <td>${escapeHtml(projectInfo.inspector)}</td>
-        <td colspan="2">${escapeHtml("www.ocsgroup.com | info@ocsgroup.com")}</td>
-      </tr>
-      <tr>
-        <td class="analytics-footer-label">Inspection Date</td>
-        <td>${new Date(inspections[0]?.DateInspected || Date.now()).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</td>
-        <td class="analytics-footer-label">QA Review</td>
-        <td>Anna</td>
-        <td class="analytics-footer-label">Page No</td>
-        <td>4</td>
-      </tr>
-    </table>
-  </div>
+  <!-- FOOTER -->
+  <table class="footer-table" style="width:100%; margin-top:8px; font-family:Calibri; font-size:8pt; border-collapse:collapse;">
+    <tr>
+      <td style="padding:2px 4px; font-weight:bold; width:12%;">Asset</td>
+      <td style="padding:2px 4px; width:20%;">${projectName}</td>
+      <td style="padding:2px 4px; font-weight:bold; width:12%;">Inspected By</td>
+      <td style="padding:2px 4px; width:20%;">${inspectorName}</td>
+      <td colspan="2" style="padding:2px 4px; text-align:right; color:#0078c9; font-weight:600;">www.ocsgroup.com | info@ocsgroup.com</td>
+    </tr>
+    <tr>
+      <td style="padding:2px 4px; font-weight:bold;">Inspection Date</td>
+      <td style="padding:2px 4px;">${inspectionMonthYear}</td>
+      <td style="padding:2px 4px; font-weight:bold;">QA Review</td>
+      <td style="padding:2px 4px;">Anna</td>
+      <td style="padding:2px 4px; font-weight:bold; text-align:right; width:8%;">Page</td>
+      <td style="padding:2px 4px; width:8%;">XX</td>
+    </tr>
+  </table>
 
-  <!-- Data Pages -->
-  <div class="page page-with-header">
-    <!-- Header -->
-    <div class="report-header">
-      <div class="header-top">
-        <div class="header-logo">OCS GROUP</div>
-        <div class="header-title">
-          <h1>DROPS SURVEY INSPECTION REPORT</h1>
-          <div class="subtitle">Dropped Objects Prevention Scheme</div>
-        </div>
-      </div>
-      <div class="header-info">
-        <div class="info-row">
-          <div class="info-label">Asset:</div>
-          <div class="info-value">${escapeHtml(projectInfo.asset)}</div>
-        </div>
-        <div class="info-row">
-          <div class="info-label">Location:</div>
-          <div class="info-value">${escapeHtml(projectInfo.location)}</div>
-        </div>
-        <div class="info-row">
-          <div class="info-label">Client:</div>
-          <div class="info-value">${escapeHtml(projectInfo.client)}</div>
-        </div>
-        <div class="info-row">
-          <div class="info-label">Inspector:</div>
-          <div class="info-value">${escapeHtml(projectInfo.inspector)}</div>
-        </div>
-        <div class="info-row">
-          <div class="info-label">Inspection Period:</div>
-          <div class="info-value">${projectInfo.dateRange}</div>
-        </div>
-        <div class="info-row">
-          <div class="info-label">Report Generated:</div>
-          <div class="info-value">${new Date().toLocaleDateString('en-GB')} ${new Date().toLocaleTimeString('en-GB')}</div>
-        </div>
-      </div>
-    </div>
+</div>
 
-    <!-- Summary Statistics -->
-    <div class="summary-stats">
-      <div class="stat-box">
-        <div class="stat-label">Total Items</div>
-        <div class="stat-value">${stats.total}</div>
-      </div>
-      <div class="stat-box pass">
-        <div class="stat-label">Pass</div>
-        <div class="stat-value">${stats.pass}</div>
-      </div>
-      <div class="stat-box fail">
-        <div class="stat-label">Fail</div>
-        <div class="stat-value">${stats.fail}</div>
-      </div>
-      <div class="stat-box pending">
-        <div class="stat-label">Pending</div>
-        <div class="stat-value">${stats.pending}</div>
-      </div>
-      <div class="stat-box critical">
-        <div class="stat-label">Critical</div>
-        <div class="stat-value">${stats.critical}</div>
-      </div>
-      <div class="stat-box major">
-        <div class="stat-label">Major</div>
-        <div class="stat-value">${stats.major}</div>
-      </div>
-      <div class="stat-box minor">
-        <div class="stat-label">Minor</div>
-        <div class="stat-value">${stats.minor}</div>
-      </div>
-    </div>
-
-    <!-- Area-wise Inspection Sections -->
-    <div class="section-header">
-      <h2>CORRECTIVE ACTION REGISTER - BY AREA</h2>
-      <div class="section-line"></div>
-    </div>
-
-    ${areaSectionsHtml}
-
-    <!-- Footer -->
-    <div class="report-footer">
-      <div class="footer-left">
-        OCS Group Inspection Division<br>
-        www.ocsgroup.com | info@ocsgroup.com
-      </div>
-      <div class="footer-right">
-        Confidential Report<br>
-        Page 5+ of ${Math.ceil(inspections.length / 10) + 4}
-      </div>
-    </div>
-  </div>
+${inspectionPagesHtml}
 </body>
 </html>`;
 
-    // Launch Puppeteer
-     const browser = await puppeteer.launch({
-  args: chromium.args,
-  executablePath: await chromium.executablePath(),
-  headless: chromium.headless,
-  defaultViewport: chromium.defaultViewport,
-});
+    // Generate PDF
+    const browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] });
     const page = await browser.newPage();
-
-    await page.setDefaultNavigationTimeout(60000);
     await page.setContent(html, { waitUntil: "networkidle0" });
     await page.emulateMediaType("print");
 
-    const pdfBuffer = await page.pdf({
+    const pdf = await page.pdf({
       format: "A4",
       printBackground: true,
       margin: { top: "15mm", bottom: "15mm", left: "12mm", right: "12mm" }
@@ -1408,14 +1491,11 @@ router.post("/reports/pdf", async (req, res) => {
     await browser.close();
 
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename=DROPS_Inspection_Report_${Date.now()}.pdf`
-    );
-    res.send(pdfBuffer);
+    res.setHeader("Content-Disposition", `attachment; filename=DROPS_Report_${Date.now()}.pdf`);
+    res.send(pdf);
+
   } catch (err) {
-    console.error("PDF generation error:", err);
-    res.status(500).json({ error: "Failed to generate PDF", details: err.message });
+    res.status(500).json({ error: "PDF generation failed", details: err.message });
   }
 });
 

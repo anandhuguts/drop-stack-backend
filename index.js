@@ -33,7 +33,8 @@ app.options(/.*/, cors());
 
 app.use(express.json({ limit: "50mb" }));      // for JSON payloads
 app.use(express.urlencoded({ limit: "50mb", extended: true })); // for form data
-app.use("/static", express.static("public"));
+app.use(express.static("public"));
+
 
 
 // Handle preflight requests
