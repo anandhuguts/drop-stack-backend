@@ -1,6 +1,7 @@
 import express from "express";
 import chromium from "@sparticuz/chromium";
 import puppeteer from "puppeteer-core";
+// import puppeteer from "puppeteer";
 import { ChartJSNodeCanvas } from "chartjs-node-canvas"; // chart rendering
 
 const router = express.Router();
@@ -477,7 +478,7 @@ function generateInspectionTablesByArea(
 
         // Dynamically adjust colspans based on photo presence
         const imageColumn = photos
-          ? `<td rowspan="3" style="border:1px solid #000; width:130px; padding:0;">
+          ? `<td rowspan="3" style="border:1px solid #000; width:200px; padding:0;">
                <img src="${photoUrl}" style="width:100%; height:160px; object-fit:cover;" />
              </td>`
           : "";
@@ -1417,6 +1418,10 @@ ${inspectionPagesHtml}
       headless: chromium.headless,
       defaultViewport: chromium.defaultViewport,
     });
+    //  const browser = await puppeteer.launch({
+    //   headless: true,
+    //   args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    // });
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0" });
     await page.emulateMediaType("print");

@@ -2,6 +2,7 @@ import express from "express";
 import chromium from "@sparticuz/chromium";
 import puppeteer from "puppeteer-core";
 import { ChartJSNodeCanvas } from "chartjs-node-canvas";
+// import puppeteer from "puppeteer";
 const router = express.Router();
 
 /* Escape helper */
@@ -47,7 +48,7 @@ router.post("/reports/pdfSecondary", async (req, res) => {
 /* Page setup */
 @page {
   size: A4;
-  margin: 15mm;
+  margin: 0;
 }
 
 body {
@@ -55,21 +56,38 @@ body {
   margin: 0;
   padding: 0;
   font-size: 11pt;
+  position: relative;
 }
 
 /* ------------------ PAGE 1 ONLY ------------------ */
-.left-bar {
+.page1 {
+  position: relative;
+  width: 210mm;
+  height: 297mm;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.orange-bar {
   position: absolute;
   left: 0;
   top: 0;
   width: 25mm;
   height: 100%;
   background: #e6732d;
+  z-index: 1;
 }
 
-.page1-container {
-  text-align: center;
+.page1-content {
+  position: relative;
+  z-index: 2;
   padding-left: 30mm;
+  padding-right: 15mm;
+  padding-top: 15mm;
+  text-align: center;
+  height: 100%;
+  box-sizing: border-box;
 }
 
 .ocs-logo {
@@ -127,14 +145,16 @@ body {
 .page {
   page-break-before: always;
   position: relative;
-  min-height: 250mm;
+  min-height: 297mm;
+  padding: 15mm;
+  box-sizing: border-box;
 }
 
 .header-container {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8mm;
+  margin-bottom: 4mm; /* Reduced from 8mm */
 }
 
 .header-logo {
@@ -153,14 +173,14 @@ body {
   text-align: center;
   font-size: 13pt;
   font-weight: bold;
-  margin: 10mm 0 6mm 0;
+  margin: 8mm 0 4mm 0; /* Reduced margins */
 }
 
 .info-table, .revision-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 10pt;
-  margin-bottom: 10mm;
+  margin-bottom: 6mm; /* Reduced from 10mm */
 }
 
 .info-table th, .info-table td,
@@ -184,7 +204,7 @@ body {
 .mission-box {
   border: 2px solid #e6732d;
   padding: 15px;
-  margin: 15mm 0;
+  margin: 10mm 0; /* Reduced from 15mm */
   text-align: center;
 }
 
@@ -211,7 +231,7 @@ body {
 .disclaimer-title {
   font-size: 12pt;
   font-weight: bold;
-  margin-top: 15mm;
+  margin-top: 10mm; /* Reduced from 15mm */
   margin-bottom: 8px;
 }
 
@@ -235,7 +255,7 @@ body {
   text-align: center;
   font-size: 14pt;
   font-weight: bold;
-  margin: 15mm 0 10mm 0;
+  margin: 10mm 0 6mm 0; /* Reduced margins */
   text-transform: uppercase;
 }
 
@@ -306,8 +326,8 @@ body {
 
 /* ------------------ GLOBAL FOOTER FOR PAGE 2+ ------------------ */
 .footer {
-  position: fixed;
-  bottom: 6mm;
+  position: absolute;
+  bottom: 15mm;
   left: 15mm;
   right: 15mm;
   font-size: 8pt;
@@ -320,37 +340,175 @@ body {
 .page-number::before {
   content: "Page " counter(page);
 }
+
+/* ------------------ INSPECTION PAGES OPTIMIZATION ------------------ */
+.inspection-page {
+  page-break-before: always;
+  position: relative;
+  min-height: 297mm;
+  padding: 12mm 15mm 15mm 15mm; /* Reduced top padding from 15mm to 12mm */
+  box-sizing: border-box;
+}
+
+.inspection-header {
+  text-align: center;
+  font-size: 14pt;
+  font-weight: bold;
+  margin-bottom: 4mm; /* Reduced from 6mm */
+}
+
+/* OCS DROPPED OBJECT TABLE */
+.ocs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9pt;
+  margin-bottom: 1mm; /* Reduced spacing between tables */
+}
+
+.ocs-th-blue {
+  background: #1f4e79;
+  color: white;
+  font-weight: bold;
+  text-align: center;
+  padding: 4px;
+  border: 1px solid #000;
+}
+
+.ocs-td {
+  border: 1px solid #000;
+  padding: 4px;
+}
+
+.ocs-photo {
+  width: 140px;
+  height: 110px;
+  object-fit: cover;
+  border: 1px solid #000;
+}
+
+.ocs-condition-pass {
+  color: green;
+  font-weight: bold;
+}
+
+.ocs-condition-fail {
+  color: #C00000;
+  font-weight: bold;
+}
+
+.ocs-recommend {
+  color: #C00000;
+  font-weight: bold;
+}
+
+.ocs-sub-blue {
+  background: #d9e2f3;
+  font-weight: bold;
+  border: 1px solid #000;
+}
+
+/* FIXED column widths EXACT to OCS sample */
+.row-table td, .blue-header th {
+  border: 1px solid #000;
+  padding: 3px;
+  vertical-align: top;
+}
+
+.blue-title {
+  background: #1F4E79;
+  color: #fff;
+  font-weight: bold;
+  text-align: center;
+  padding: 6px;
+  border: 1px solid #000;
+}
+
+.blue-sub {
+  background: #D9E2F3;
+  font-size: 9pt;
+  border: 1px solid #000;
+  padding: 4px;
+}
+
+.blue-header th {
+  background: #00009A;
+  color: #fff;
+  font-weight: bold;
+  text-align: center;
+  font-size: 9pt;
+  padding: 4px;
+}
+
+
+/* EXACT column sizes */
+.col-no { width: 22px; text-align:center; }
+.col-photo { width: 135px; text-align:center; }
+.col-ref { width: 70px; text-align:center; }
+.col-desc { width: 95px; }
+.col-location { width: 75px; }
+.col-access { width: 55px; text-align:center; }
+.col-fastening { width: 115px; }
+.col-frequency { width: 60px; text-align:center; }
+.col-inspect { width: 150px; }
+.col-condition { width: 70px; text-align:center; font-weight:bold; }
+.col-comments { width: 210px; }
+
+/* Photo box EXACT size */
+.photo-box {
+  width: 135px;
+  height: 110px;
+  object-fit: cover;
+  display: block;
+}
+
+/* Condition colors */
+.fail-text { color: #C00000; font-weight:bold; }
+.pass-text { color: green; font-weight:bold; }
+
+/* Compact row styling */
+.compact-row {
+  margin: 0;
+  padding: 0;
+}
+
+.compact-row td {
+  padding: 2px 3px;
+  line-height: 1.2;
+}
+
 </style>
 </head>
 
 <body>
 
 <!-- ========== PAGE 1 - COVER PAGE ========== -->
-<div class="left-bar"></div>
-<div class="page1-container">
-  <img src="${hostBase}/ocslogo.png" class="ocs-logo" />
-  <div class="main-title">${escapeHtml(assetName)}</div>
-  <div class="rig-title">${escapeHtml(rigName)}</div>
-  <div class="sub-title">${escapeHtml(reportTitle)}</div>
-  <img src="${hostBase}/drop-stack-title-image.png" class="title-image" />
-  <div class="client-title">CLIENT: ${escapeHtml(clientName)}</div>
+<div class="page1">
+  <div class="orange-bar"></div>
+  <div class="page1-content">
+    <img src="${hostBase}/ocslogo.png" class="ocs-logo" />
+    <div class="main-title">${escapeHtml(assetName)}</div>
+    <div class="rig-title">${escapeHtml(rigName)}</div>
+    <div class="sub-title">${escapeHtml(reportTitle)}</div>
+    <img src="${hostBase}/drop-stack-title-image.png" class="title-image" />
+    <div class="client-title">CLIENT: ${escapeHtml(clientName)}</div>
 
-  <table class="cover-table">
-    <tr>
-      <th>Revision</th>
-      <th>Approve Date</th>
-      <th>Prepared By</th>
-      <th>Quality Review</th>
-      <th>Approve by</th>
-    </tr>
-    <tr>
-      <td>${revision}</td>
-      <td>${approveDate}</td>
-      <td>${escapeHtml(preparedBy)}</td>
-      <td>${escapeHtml(qualityReview)}</td>
-      <td>${escapeHtml(approvedBy)}</td>
-    </tr>
-  </table>
+    <table class="cover-table">
+      <tr>
+        <th>Revision</th>
+        <th>Approve Date</th>
+        <th>Prepared By</th>
+        <th>Quality Review</th>
+        <th>Approve by</th>
+      </tr>
+      <tr>
+        <td>${revision}</td>
+        <td>${approveDate}</td>
+        <td>${escapeHtml(preparedBy)}</td>
+        <td>${escapeHtml(qualityReview)}</td>
+        <td>${escapeHtml(approvedBy)}</td>
+      </tr>
+    </table>
+  </div>
 </div>
 
 <!-- ========== PAGE 2 - REPORT INFORMATION ========== -->
@@ -678,6 +836,150 @@ body {
     © 2020 OCS Group │All Rights Reserved | Page 8 of 10
   </div>
 </div>
+<!-- ========== PAGE 9 - APPENDIX A TITLE ========== -->
+<div class="page">
+  <div class="header-container">
+    <img src="${hostBase}/ocslogo.png" class="header-logo" />
+    <div class="header-text">
+      ${escapeHtml(clientName)}<br/>
+      ${escapeHtml(rigName)}<br/>
+      ${escapeHtml(reportTitle)}
+    </div>
+  </div>
+
+  <div style="margin-top: 90mm; text-align:center; font-size:14pt; font-weight:bold;">
+    C.&nbsp;&nbsp;&nbsp; APPENDIX A: DROPPED OBJECT INSPECTION RESULT
+  </div>
+
+  <div class="footer">
+    Doc Title: ${escapeHtml(rigName)} ${escapeHtml(reportTitle)} | Revised By: Axel Tay |
+    Approved By: ${escapeHtml(approvedBy)}<br/>
+    Doc Number: ${escapeHtml(reportNumber)} | Revision: ${revision} | Approval Date: ${approveDate} 2020<br/>
+    © 2020 OCS Group │All Rights Reserved | Page 9
+  </div>
+</div>
+
+${(() => {
+  let htmlOut = "";
+  let page = 10;
+
+  // Increased items per page since we have more space now
+  const perPage = 6; // Increased from 4 to 6
+  const items = inspections;
+
+  for (let i = 0; i < items.length; i += perPage) {
+    const chunk = items.slice(i, i + perPage);
+
+    htmlOut += `
+<div class="inspection-page">
+  <div class="header-container">
+    <img src="${hostBase}/ocslogo.png" class="header-logo" />
+    <div class="header-text">
+      ${escapeHtml(clientName)}<br/>
+      ${escapeHtml(rigName)}<br/>
+      ${escapeHtml(reportTitle)}
+    </div>
+  </div>
+
+  <div class="inspection-header">
+    INSPECTED ITEMS
+  </div>
+
+  <!-- Blue Header Block -->
+  <table class="ocs-table fixed-header">
+    <tr>
+      <td colspan="11" class="blue-title">INSPECTED ITEMS</td>
+    </tr>
+    <tr class="blue-sub">
+      <td colspan="11">
+        <b>Project Number:</b> ${reportNumber}
+        &nbsp;&nbsp;&nbsp;&nbsp;
+        <b>Rig Name:</b> ${rigName}
+        &nbsp;&nbsp;&nbsp;&nbsp;
+        <b>Inspection Date:</b> ${surveyDate}
+        <br/>
+        <b>Client:</b> ${clientName}
+        &nbsp;&nbsp;&nbsp;&nbsp;
+        <b>Area:</b> FAIL AREAS
+      </td>
+    </tr>
+    <tr class="blue-header">
+      <th>No.</th>
+      <th>Photo</th>
+      <th>Photo Ref No.</th>
+      <th>Item Description</th>
+      <th>Location</th>
+      <th>Accessible</th>
+      <th>Fastening Method</th>
+      <th>Inspection Frequency (DAYS)</th>
+      <th>How to Inspect</th>
+      <th>Condition</th>
+      <th>Comments & Recommendations</th>
+    </tr>
+  </table>
+`;
+
+    chunk.forEach((row, idx) => {
+      const photo = row.photos?.length ? `${hostBase}/api/images/${row.photos[0]}` : "";
+
+      const globalIndex = i + idx + 1;
+      const condFail = row.Status !== "PASS";
+
+      htmlOut += `
+<table class="ocs-table row-table compact-row">
+  <tr>
+    <td class="col-no">${globalIndex}</td>
+
+    <td class="col-photo">
+      ${photo ? `<img src="${photo}" class="photo-box" />` : ""}
+    </td>
+
+    <td class="col-ref">${escapeHtml(row.EquipNumber || "")}</td>
+    <td class="col-desc">${escapeHtml(row.EquipmentName || "")}</td>
+    <td class="col-location">${escapeHtml(row.LocationName || "")}</td>
+    <td class="col-access">Yes</td>
+
+    <td class="col-fastening">
+      <b>Primary:</b> ${escapeHtml(row.FasteningMethod || "None")}<br/>
+      <b>Secondary:</b> ${escapeHtml(row.SecFastMethod || "None")}
+    </td>
+
+    <td class="col-frequency">
+      ${escapeHtml(row.Control || "7 Days")}
+    </td>
+
+    <td class="col-inspect">
+      ${escapeHtml(row.PrimaryComments || "")}
+    </td>
+
+    <td class="col-condition ${condFail ? "fail-text" : "pass-text"}">
+      ${escapeHtml(row.Status || "")}
+    </td>
+
+    <td class="col-comments">
+      ${row.SecondaryComments ? `> ${escapeHtml(row.SecondaryComments)}<br/>` : ""}
+      ${row.Comments ? `<b>RECOMMENDATION</b><br/>${escapeHtml(row.Comments)}` : ""}
+    </td>
+  </tr>
+</table>
+`;
+    });
+
+    htmlOut += `
+  <div class="footer">
+    Doc Title: ${rigName} ${reportTitle} |
+    Revised By: Axel Tay | Approved By: ${approvedBy}<br/>
+    Doc Number: ${reportNumber} | Revision: ${revision} | Approval Date: ${approveDate} 2020<br/>
+    © 2020 OCS Group │ All Rights Reserved | Page ${page}
+  </div>
+</div>
+`;
+
+    page++;
+  }
+
+  return htmlOut;
+})()}
 
 </body>
 </html>
