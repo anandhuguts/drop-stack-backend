@@ -14,6 +14,242 @@ function escapeHtml(str = "") {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 }
+function generateInspectionPages(
+  inspections,
+  hostBase,
+  clientName,
+  rigName,
+  reportTitle,
+  reportNumber,
+  surveyDate,
+  approvedBy,
+  revision
+) {
+  let htmlOut = "";
+  let page = 10;
+  const perPage = 6;
+
+  // Group inspections by LocationName (Area)
+const groupedByArea = inspections.reduce((acc, item) => {
+  const area = item.AreaName || "Unknown Area";
+  if (!acc[area]) {
+    acc[area] = [];
+  }
+  acc[area].push(item);
+  return acc;
+}, {});
+
+  // Process each area
+  Object.entries(groupedByArea).forEach(([areaName, areaInspections]) => {
+    // Paginate within each area
+    for (let i = 0; i < areaInspections.length; i += perPage) {
+      const chunk = areaInspections.slice(i, i + perPage);
+
+      htmlOut += `
+<div class="inspection-page">
+
+  <!-- HEADER -->
+  <div class="header-container">
+    <img src="${hostBase}/ocslogo.png" class="header-logo" />
+    <div class="header-text">
+      ${escapeHtml(clientName)}<br/>
+      ${escapeHtml(rigName)}<br/>
+      ${escapeHtml(reportTitle)}
+    </div>
+  </div>
+
+  <div class="inspection-header">INSPECTED ITEMS</div>
+
+  <!-- TABLE -->
+  <table style="width:100%; border-collapse:collapse; table-layout:fixed; font-size:9pt;">
+
+    <!-- PROJECT SUBTITLE ROW (MATCHING OCS SAMPLE) -->
+    <tr>
+      <td colspan="11" style="
+        background:#D9E2F3;
+        border:1px solid #000;
+        padding:8px;
+        font-size:9pt;
+      ">
+
+        <table style="width:100%; border-collapse:collapse; font-size:9pt;">
+          <tr>
+
+            <!-- LEFT SIDE -->
+            <td style="width:50%; vertical-align:top;">
+
+              <div><b>Project Number:</b> 
+                <span style="text-decoration:underline;">${reportNumber}</span>
+              </div>
+
+              <div><b>Client Name:</b> 
+                <span style="text-decoration:underline;">${clientName}</span>
+              </div>
+
+              <div><b>Location:</b> 
+                <span style="text-decoration:underline;">Malaysia, Offshore Terengganu</span>
+              </div>
+
+            </td>
+
+            <!-- RIGHT SIDE -->
+            <td style="width:50%; vertical-align:top;">
+
+              <div><b>Rig Name:</b> 
+                <span style="text-decoration:underline;">${rigName}</span>
+              </div>
+
+              <div><b>Inspection Date:</b> 
+                <span style="text-decoration:underline;">${surveyDate}</span>
+              </div>
+
+              <div><b>Area:</b> 
+                <span style="text-decoration:underline; color:red; font-weight:bold;">${escapeHtml(areaName)}</span>
+              </div>
+
+            </td>
+
+          </tr>
+        </table>
+
+      </td>
+    </tr>
+
+    <!-- COLUMN HEADERS -->
+    <tr>
+      <th style="width:2%; background:#00009A; color:white; border:1px solid #000; padding:3px; font-size:8pt;">No.</th>
+      <th style="width:15%; background:#00009A; color:white; border:1px solid #000; padding:3px; font-size:8pt;">Photo</th>
+      <th style="width:7%; background:#00009A; color:white; border:1px solid #000; padding:3px; font-size:8pt;">Photo Ref No.</th>
+      <th style="width:9%; background:#00009A; color:white; border:1px solid #000; padding:3px; font-size:8pt;">Item Description</th>
+      <th style="width:7%; background:#00009A; color:white; border:1px solid #000; padding:3px; font-size:8pt;">Location</th>
+      <th style="width:5%; background:#00009A; color:white; border:1px solid #000; padding:3px; font-size:8pt;">Accessible</th>
+      <th style="width:12%; background:#00009A; color:white; border:1px solid #000; padding:3px; font-size:8pt;">Fastening Method</th>
+      <th style="width:7%; background:#00009A; color:white; border:1px solid #000; padding:3px; font-size:8pt;">Inspection Freq</th>
+      <th style="width:13%; background:#00009A; color:white; border:1px solid #000; padding:3px; font-size:8pt;">How to Inspect</th>
+      <th style="width:8%; background:#00009A; color:white; border:1px solid #000; padding:3px; font-size:8pt;">Condition</th>
+      <th style="width:15%; background:#00009A; color:white; border:1px solid #000; padding:3px; font-size:8pt;">Comments & Recommendations</th>
+    </tr>
+
+    <!-- DATA ROWS -->
+    ${chunk
+      .map((row, idx) => {
+        const photo = row.photos?.length
+          ? `${hostBase}/api/images/${row.photos[0]}`
+          : `${hostBase}/istockphoto-1472933890-612x612.jpg`;
+
+        const condFail = row.Status !== "PASS";
+        const condColor = condFail ? "#C00000" : "green";
+
+        return `
+      <tr style="height:100px;">
+
+        <!-- NO -->
+        <td style="width:2%; border:1px solid #000; padding:2px; text-align:center; vertical-align:middle; font-size:8pt;">
+          ${i + idx + 1}
+        </td>
+
+        <!-- PHOTO (FIXED SIZE, NO OVERFLOW) -->
+        <td style="width:15%; border:1px solid #000; padding:2px; vertical-align:middle; text-align:center;">
+          <div style="
+            width:100%;
+            height:90px;
+            overflow:hidden;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+          ">
+            <img src="${photo}"
+              style="
+                max-width:100%;
+                max-height:90px;
+                width:auto;
+                height:auto;
+                object-fit:contain;
+              "
+            />
+          </div>
+        </td>
+
+        <!-- PHOTO REF -->
+        <td style="width:7%; border:1px solid #000; padding:2px; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word; font-size:7pt; line-height:1.2;">
+          ${escapeHtml(row.EquipNumber || "")}
+        </td>
+
+        <!-- ITEM DESCRIPTION -->
+        <td style="width:9%; border:1px solid #000; padding:2px; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word; font-size:7pt; line-height:1.2; max-height:100px; overflow:hidden;">
+          ${escapeHtml(row.EquipmentName || "")}
+        </td>
+
+        <!-- LOCATION -->
+        <td style="width:7%; border:1px solid #000; padding:2px; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word; font-size:7pt; line-height:1.2;">
+          ${escapeHtml(row.LocationName || "")}
+        </td>
+
+        <!-- ACCESSIBLE -->
+        <td style="width:5%; border:1px solid #000; padding:2px; text-align:center; vertical-align:middle; font-size:7pt;">
+          Yes
+        </td>
+
+        <!-- FASTENING -->
+        <td style="width:12%; border:1px solid #000; padding:2px; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word; font-size:7pt; line-height:1.2; max-height:100px; overflow:hidden;">
+          <b>Primary:</b> ${escapeHtml(row.FasteningMethod || "None")}<br/>
+          <b>Secondary:</b> ${escapeHtml(row.SecFastMethod || "None")}
+        </td>
+
+        <!-- FREQUENCY -->
+        <td style="width:7%; border:1px solid #000; padding:2px; text-align:center; vertical-align:middle; font-size:7pt; word-wrap:break-word;">
+          ${escapeHtml(row.Control || "7 Days")}
+        </td>
+
+        <!-- HOW TO INSPECT -->
+        <td style="width:13%; border:1px solid #000; padding:2px; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word; font-size:7pt; line-height:1.2; max-height:100px; overflow:hidden;">
+          ${escapeHtml(row.PrimaryComments || "")}
+        </td>
+
+        <!-- CONDITION -->
+        <td style="width:8%; border:1px solid #000; padding:2px; text-align:center; font-weight:bold; color:${condColor}; vertical-align:middle; font-size:8pt;">
+          ${escapeHtml(row.Status || "")}
+        </td>
+
+        <!-- COMMENTS -->
+        <td style="width:15%; border:1px solid #000; padding:2px; vertical-align:top; word-wrap:break-word; overflow-wrap:break-word; font-size:7pt; line-height:1.2; max-height:100px; overflow:hidden;">
+          ${
+            row.SecondaryComments
+              ? `> ${escapeHtml(row.SecondaryComments)}<br/>`
+              : ""
+          }
+          ${
+            row.Comments
+              ? `<b>RECOMMENDATION</b><br/>${escapeHtml(row.Comments)}`
+              : ""
+          }
+        </td>
+
+      </tr>
+      `;
+      })
+      .join("")}
+
+  </table>
+
+  <!-- FOOTER -->
+  <div class="footer">
+    Doc Title: ${escapeHtml(rigName)} ${escapeHtml(reportTitle)} |
+    Revised By: Axel Tay | Approved By: ${escapeHtml(approvedBy)}<br/>
+    Doc Number: ${escapeHtml(reportNumber)} | Revision: ${revision}<br/>
+    © 2020 OCS Group │ All Rights Reserved | Page ${page}
+  </div>
+
+</div>
+      `;
+
+      page++;
+    }
+  });
+
+  return htmlOut;
+}
+
 
 router.post("/reports/pdfSecondary", async (req, res) => {
   try {
@@ -346,7 +582,7 @@ body {
   page-break-before: always;
   position: relative;
   min-height: 297mm;
-  padding: 12mm 15mm 15mm 15mm; /* Reduced top padding from 15mm to 12mm */
+  padding: 10mm 12mm 15mm 12mm;
   box-sizing: border-box;
 }
 
@@ -361,9 +597,16 @@ body {
 .ocs-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 9pt;
-  margin-bottom: 1mm; /* Reduced spacing between tables */
+  margin-top: 5px;
+  table-layout: fixed;        /* SUPER IMPORTANT — evenly locks widths */
 }
+  .ocs-table td {
+  border: 1px solid #000;
+  font-size: 9pt;
+  padding: 4px;
+  vertical-align: top;
+}
+
 
 .ocs-th-blue {
   background: #1f4e79;
@@ -418,48 +661,68 @@ body {
   background: #1F4E79;
   color: #fff;
   font-weight: bold;
-  text-align: center;
   padding: 6px;
+  text-align: center;
   border: 1px solid #000;
+  font-size: 11px;
 }
 
 .blue-sub {
   background: #D9E2F3;
-  font-size: 9pt;
   border: 1px solid #000;
-  padding: 4px;
+  padding: 5px;
+  font-weight: bold;
+  font-size: 10px;
 }
 
+
 .blue-header th {
-  background: #00009A;
+  background: #1F4E79;
   color: #fff;
   font-weight: bold;
   text-align: center;
   font-size: 9pt;
   padding: 4px;
+  border: 1px solid #000;
 }
 
 
 /* EXACT column sizes */
-.col-no { width: 22px; text-align:center; }
-.col-photo { width: 135px; text-align:center; }
-.col-ref { width: 70px; text-align:center; }
-.col-desc { width: 95px; }
-.col-location { width: 75px; }
-.col-access { width: 55px; text-align:center; }
-.col-fastening { width: 115px; }
-.col-frequency { width: 60px; text-align:center; }
-.col-inspect { width: 150px; }
-.col-condition { width: 70px; text-align:center; font-weight:bold; }
-.col-comments { width: 210px; }
+.col-no        { width: 22px;  text-align:center; }
+.col-photo {
+  width: 140px;
+  text-align: center;
+  overflow: hidden;        /* prevents escaping */
+  box-sizing: border-box;
+}
+.col-comments,
+.col-inspect,
+.col-fastening {
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;   /* allow wrapping */
+}
+
+.col-ref       { width: 70px;  text-align:center; }
+.col-desc      { width: 90px; }
+.col-location  { width: 75px; }
+.col-access    { width: 50px;  text-align:center; }
+.col-fastening { width: 110px; }
+.col-frequency { width: 55px;  text-align:center; }
+.col-inspect   { width: 150px; }
+.col-condition { width: 70px;  text-align:center; font-weight:bold; }
+.col-comments  { width: 210px; }
 
 /* Photo box EXACT size */
 .photo-box {
-  width: 135px;
+  width: 100%;
   height: 110px;
   object-fit: cover;
   display: block;
+  overflow: hidden;
 }
+
+
 
 /* Condition colors */
 .fail-text { color: #C00000; font-weight:bold; }
@@ -475,6 +738,16 @@ body {
   padding: 2px 3px;
   line-height: 1.2;
 }
+  /* A3 Landscape for Inspection Pages Only */
+@page a3 {
+  size: A3 landscape;
+  margin: 10mm;
+}
+
+.a3-page {
+  page: a3;
+}
+
 
 </style>
 </head>
@@ -859,132 +1132,27 @@ body {
   </div>
 </div>
 
-${(() => {
-  let htmlOut = "";
-  let page = 10;
+${generateInspectionPages(
+  inspections,
+  hostBase,
+  clientName,
+  rigName,
+  reportTitle,
+  reportNumber,
+  surveyDate,
+  approvedBy,
+  revision
+)}
 
-  // Increased items per page since we have more space now
-  const perPage = 6; // Increased from 4 to 6
-  const items = inspections;
-
-  for (let i = 0; i < items.length; i += perPage) {
-    const chunk = items.slice(i, i + perPage);
-
-    htmlOut += `
-<div class="inspection-page">
-  <div class="header-container">
-    <img src="${hostBase}/ocslogo.png" class="header-logo" />
-    <div class="header-text">
-      ${escapeHtml(clientName)}<br/>
-      ${escapeHtml(rigName)}<br/>
-      ${escapeHtml(reportTitle)}
-    </div>
-  </div>
-
-  <div class="inspection-header">
-    INSPECTED ITEMS
-  </div>
-
-  <!-- Blue Header Block -->
-  <table class="ocs-table fixed-header">
-    <tr>
-      <td colspan="11" class="blue-title">INSPECTED ITEMS</td>
-    </tr>
-    <tr class="blue-sub">
-      <td colspan="11">
-        <b>Project Number:</b> ${reportNumber}
-        &nbsp;&nbsp;&nbsp;&nbsp;
-        <b>Rig Name:</b> ${rigName}
-        &nbsp;&nbsp;&nbsp;&nbsp;
-        <b>Inspection Date:</b> ${surveyDate}
-        <br/>
-        <b>Client:</b> ${clientName}
-        &nbsp;&nbsp;&nbsp;&nbsp;
-        <b>Area:</b> FAIL AREAS
-      </td>
-    </tr>
-    <tr class="blue-header">
-      <th>No.</th>
-      <th>Photo</th>
-      <th>Photo Ref No.</th>
-      <th>Item Description</th>
-      <th>Location</th>
-      <th>Accessible</th>
-      <th>Fastening Method</th>
-      <th>Inspection Frequency (DAYS)</th>
-      <th>How to Inspect</th>
-      <th>Condition</th>
-      <th>Comments & Recommendations</th>
-    </tr>
-  </table>
-`;
-
-    chunk.forEach((row, idx) => {
-      const photo = row.photos?.length ? `${hostBase}/api/images/${row.photos[0]}` : "";
-
-      const globalIndex = i + idx + 1;
-      const condFail = row.Status !== "PASS";
-
-      htmlOut += `
-<table class="ocs-table row-table compact-row">
-  <tr>
-    <td class="col-no">${globalIndex}</td>
-
-    <td class="col-photo">
-      ${photo ? `<img src="${photo}" class="photo-box" />` : ""}
-    </td>
-
-    <td class="col-ref">${escapeHtml(row.EquipNumber || "")}</td>
-    <td class="col-desc">${escapeHtml(row.EquipmentName || "")}</td>
-    <td class="col-location">${escapeHtml(row.LocationName || "")}</td>
-    <td class="col-access">Yes</td>
-
-    <td class="col-fastening">
-      <b>Primary:</b> ${escapeHtml(row.FasteningMethod || "None")}<br/>
-      <b>Secondary:</b> ${escapeHtml(row.SecFastMethod || "None")}
-    </td>
-
-    <td class="col-frequency">
-      ${escapeHtml(row.Control || "7 Days")}
-    </td>
-
-    <td class="col-inspect">
-      ${escapeHtml(row.PrimaryComments || "")}
-    </td>
-
-    <td class="col-condition ${condFail ? "fail-text" : "pass-text"}">
-      ${escapeHtml(row.Status || "")}
-    </td>
-
-    <td class="col-comments">
-      ${row.SecondaryComments ? `> ${escapeHtml(row.SecondaryComments)}<br/>` : ""}
-      ${row.Comments ? `<b>RECOMMENDATION</b><br/>${escapeHtml(row.Comments)}` : ""}
-    </td>
-  </tr>
-</table>
-`;
-    });
-
-    htmlOut += `
-  <div class="footer">
-    Doc Title: ${rigName} ${reportTitle} |
-    Revised By: Axel Tay | Approved By: ${approvedBy}<br/>
-    Doc Number: ${reportNumber} | Revision: ${revision} | Approval Date: ${approveDate} 2020<br/>
-    © 2020 OCS Group │ All Rights Reserved | Page ${page}
-  </div>
-</div>
-`;
-
-    page++;
-  }
-
-  return htmlOut;
-})()}
 
 </body>
 </html>
 `;
 
+    // const browser = await puppeteer.launch({
+    //   headless: true,
+    //   args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    // });
     // Puppeteer Launch
     const browser = await puppeteer.launch({
       args: chromium.args,
