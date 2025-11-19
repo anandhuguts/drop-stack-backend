@@ -23,7 +23,8 @@ function generateInspectionPages(
   reportNumber,
   surveyDate,
   approvedBy,
-  revision
+  revision,
+  totalPages
 ) {
   let htmlOut = "";
   let page = 10;
@@ -46,7 +47,7 @@ const groupedByArea = inspections.reduce((acc, item) => {
       const chunk = areaInspections.slice(i, i + perPage);
 
       htmlOut += `
-<div class="inspection-page">
+<div class="inspection-page ">
 
   <!-- HEADER -->
   <div class="header-container">
@@ -233,12 +234,24 @@ const groupedByArea = inspections.reduce((acc, item) => {
   </table>
 
   <!-- FOOTER -->
-  <div class="footer">
-    Doc Title: ${escapeHtml(rigName)} ${escapeHtml(reportTitle)} |
-    Revised By: Axel Tay | Approved By: ${escapeHtml(approvedBy)}<br/>
-    Doc Number: ${escapeHtml(reportNumber)} | Revision: ${revision}<br/>
-    © 2020 OCS Group │ All Rights Reserved | Page ${page}
+<div class="footer2">
+  <div class="footer-left">
+    <div>Dropped Object Report: ${escapeHtml(reportNumber)}</div>
+    <div>Approved: ${approvedBy} 2020</div>
+    <div>Rev: ${revision}</div>
   </div>
+
+  <div class="footer-center">
+    <div>OCS Group</div>
+    <div>1 International Business Park</div>
+    <div>Singapore 609917</div>
+  </div>
+
+  <div class="footer-right">
+    Page ${page} of ${totalPages}
+  </div>
+</div>
+
 
 </div>
       `;
@@ -261,6 +274,12 @@ router.post("/reports/pdfSecondary", async (req, res) => {
       req.body.hostBase || `http://localhost:${process.env.PORT || 5000}`;
 
     // Imported or default values
+    // Compute total pages
+const fixedPages = 9; // cover, report info, mission, toc, workscope, summary, appendix
+const perPage = 6;
+const dynamicPages = Math.ceil(inspections.length / perPage);
+const totalPages = fixedPages + dynamicPages;
+
     const clientName = inspections[0]?.ClientName || "UZMA ENGINEERING SDN BHD";
     const assetName = inspections[0]?.AssetName || "HYDRAULIC WORKOVER RIG";
     const rigName = inspections[0]?.RigName || "JENSAK 342";
@@ -724,6 +743,7 @@ body {
 
 
 
+
 /* Condition colors */
 .fail-text { color: #C00000; font-weight:bold; }
 .pass-text { color: green; font-weight:bold; }
@@ -747,6 +767,49 @@ body {
 .a3-page {
   page: a3;
 }
+
+.footer {
+  position: absolute;
+  bottom: 15mm;
+  left: 15mm;
+  right: 15mm;
+  font-size: 8pt;
+  text-align: center;
+  border-top: 1px solid #aaa;
+  padding-top: 4px;
+  line-height: 1.3;
+}
+.footer2 {
+  position: absolute;
+  bottom: 10mm;
+  left: 15mm;
+  right: 15mm;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  font-size: 8pt;
+  line-height: 1.2;
+  color: #000;
+}
+
+.footer-left {
+  text-align: left;
+  white-space: nowrap;
+}
+
+.footer-center {
+  text-align: center;
+  white-space: nowrap;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.footer-right {
+  text-align: right;
+  white-space: nowrap;
+}
+
 
 
 </style>
@@ -1141,7 +1204,8 @@ ${generateInspectionPages(
   reportNumber,
   surveyDate,
   approvedBy,
-  revision
+  revision,
+  totalPages
 )}
 
 
