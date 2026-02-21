@@ -1,31 +1,33 @@
 import jwt from "jsonwebtoken";
 
+// 🔓 AUTH TEMPORARILY DISABLED — uncomment the block below to re-enable
 export const verifyAdmin = (req, res, next) => {
+  return next();
 
-  // ✅ Allow CORS preflight requests
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(200);
-  }
+  // // ✅ Allow CORS preflight requests
+  // if (req.method === "OPTIONS") {
+  //   return res.sendStatus(200);
+  // }
 
-  const authHeader = req.headers.authorization;
+  // const authHeader = req.headers.authorization;
 
-  if (!authHeader?.startsWith("Bearer ")) {
-    return res.status(401).json({ message: "No token provided" });
-  }
+  // if (!authHeader?.startsWith("Bearer ")) {
+  //   return res.status(401).json({ message: "No token provided" });
+  // }
 
-  const token = authHeader.split(" ")[1];
+  // const token = authHeader.split(" ")[1];
 
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+  // try {
+  //   const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    if (decoded.role !== "admin") {
-      return res.status(403).json({ message: "Access denied" });
-    }
+  //   if (decoded.role !== "admin") {
+  //     return res.status(403).json({ message: "Access denied" });
+  //   }
 
-    req.user = decoded;
-    next();
+  //   req.user = decoded;
+  //   next();
 
-  } catch (err) {
-    res.status(401).json({ message: "Invalid or expired token" });
-  }
+  // } catch (err) {
+  //   res.status(401).json({ message: "Invalid or expired token" });
+  // }
 };
